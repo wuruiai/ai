@@ -307,6 +307,20 @@
 
 ---
 
+> **实施状态(2026-08-06)**:Phase 5 全部完成 —— G5.1 ✅ / G5.2 ✅ / G5.3 ✅
+> - G5.1：Dockerfile 就绪探针改走 `/health/ready`；dev compose 补显式 healthcheck；
+>   新增独立生产清单 `docker-compose.prod.yml`（预构建镜像 + `${VERSION:-latest}` +
+>   `restart:always` + `APP_ENV=production` fail-fast + 命名卷 + `pull_policy:always`）；
+>   `.gitignore` 扩为 `.env.*`（防 `.env.production` 入库）；README 补 build/push/部署/回滚。
+> - G5.2：`scripts/backup_data.py` 拆 `run_backup()`（可复用）加 `--retention-days` 保留策略
+>   与备份自检（`PRAGMA integrity_check` + Chroma 非空，失败删该备份）；新增
+>   `scripts/backup_cron.py`（`--once` 计划任务模式 + `--interval-hours` 常驻循环），受
+>   `BACKUP_ENABLED` 控制；`.env.example`/README 补 `BACKUP_ENABLED`/`BACKUP_RETENTION_DAYS`/`REDIS_URL`。
+> - G5.3：新增 `backend/core/backends.py` 抽象 `RateLimitBackend`/`BudgetBackend`（Protocol +
+>   InMemory/Redis 两实现 + 工厂），`rate_limit.py`/`budget.py` 保留 `RateLimiter`/`BudgetManager`
+>   别名并改走工厂；Redis 限流 member 唯一化防同毫秒合并；懒加载 `redis` 包缺依赖报错提示。
+> - 验证：全量 133 单测 + ruff 全绿；compose 两份文件 `config` 校验通过；备份自检/保留策略实测。
+
 ## Phase 5 — 部署与运维
 
 ### G5.1 Docker HEALTHCHECK + prod override
