@@ -246,7 +246,7 @@
 
 ## Phase 4 — 任务与数据层
 
-> **实施状态(2026-08-06)**:G4.2 ✅ / G4.3 ✅ / G4.4 ✅ / G4.1 ⏳（池与迁移强化先行，任务队列收尾）
+> **实施状态(2026-08-06)**:Phase 4 全部完成 —— G4.2 ✅ / G4.3 ✅ / G4.4 ✅ / G4.1 ✅
 >
 > - G4.2: `backend/db/connection.py` 改有界连接池 `SQLitePool`（asyncio.Queue 空闲复用，
 >   `get_connection`=checkout / `close_db`=checkin 签名不变，调用方零改动）；归还时 rollback
@@ -259,7 +259,14 @@
 > - G4.4: `migrations.py` 加 `migration_log` 审计表（migrate 每步写 applied、降级写 rolled_back，
 >   与版本号同一事务）；补 `downgrade(db, to)` + `_downgrade_v2/v3/v4`（SQLite DROP COLUMN/TABLE，
 >   均事务性）；新增 `scripts/downgrade_db.py --to`；`test_migrations.py` 7 用例覆盖日志、
->   降级到 v2/v1、降级再升级回补。全套 pytest 115 绿。
+>   降级到 v2/v1、降级再升级回补。
+> - G4.1: 新增 `backend/tasks/queue.py` 持久化队列 —— `enqueue`（幂等入队）/ `claim`（原子抢占，
+>   乐观锁 `AND status='pending'`）/ `worker_loop`（claim→ingest→落态，失败 attempts<3 回队重试、
+>   超限或文档已删则终态 failed）/ `recover_stale_tasks`（启动回收超租约任务）。SCHEMA_VERSION 升至
+>   v5：重建 `ingestion_tasks`（CHECK 增加 'running' + 新增 `claimed_at`/`attempts`），含对称降级。
+>   `documents.py` 上传改为 `await _spawn_ingestion` 入队；`main.py` lifespan 启动进程内 worker（
+>   `INGESTION_WORKER_IN_PROCESS` 可关，测试 conftest 关）；新增 `scripts/worker.py` 独立进程多开。
+>   `test_ingestion_queue.py` 9 用例覆盖入队幂等/原子抢占/恢复/重试/终态。全套 pytest 120 绿。
 
 ### G4.1 摄取任务持久化队列
 - **现状**:`documents.py:47-51` `asyncio.create_task` 进程内任务,重启丢任务、无重试、多 worker 重复摄取。

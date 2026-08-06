@@ -70,7 +70,7 @@ async def test_migrate_idempotent_does_not_dup_log(tmp_path):
 
 
 async def test_downgrade_to_v2(tmp_path):
-    """G4.4：降到 v2 —— 版本号回写、v3/v4 的表/列移除、日志留痕。"""
+    """G4.4：降到 v2 —— 版本号回写、v3+ 的表/列移除、日志留痕。"""
     db = await aiosqlite.connect(str(tmp_path / "m.db"))
     try:
         await migrate(db)
@@ -82,20 +82,28 @@ async def test_downgrade_to_v2(tmp_path):
         assert "llm_usage" not in tables  # v4
         assert "audit_log" in tables  # v2 特性应保留
 
-        # v3/v4 加的列已删；v2 加的列仍在
+        # v3+ 加的列已删；v2 加的列仍在
         users_cols = await _cols(db, "users")
         assert "token_version" not in users_cols
         assert {"password_hash", "role", "is_active"} <= users_cols
         assert "user_id" in await _cols(db, "documents")
         assert "user_id" in await _cols(db, "messages")
+        # v5 队列列已删
+        task_cols = await _cols(db, "ingestion_tasks")
+        assert "claimed_at" not in task_cols
+        assert "attempts" not in task_cols
 
-        # 审计：两条 rolled_back（v4、v3），v2 之后停止
+        # 审计：rolled_back（v5、v4、v3），v2 之后停止
         async with db.execute(
             "SELECT version, name, status FROM migration_log "
             "WHERE status='rolled_back' ORDER BY version"
         ) as cur:
             rows = await cur.fetchall()
-        assert [(r[0], r[2]) for r in rows] == [(3, "rolled_back"), (4, "rolled_back")]
+        assert [(r[0], r[2]) for r in rows] == [
+            (3, "rolled_back"),
+            (4, "rolled_back"),
+            (5, "rolled_back"),
+        ]
     finally:
         await db.close()
 
@@ -117,12 +125,15 @@ async def test_downgrade_to_v1(tmp_path):
         assert not {"password_hash", "role", "is_active", "token_version"} & users_cols
         assert "user_id" not in await _cols(db, "documents")
         assert "user_id" not in await _cols(db, "messages")
+        task_cols = await _cols(db, "ingestion_tasks")
+        assert "claimed_at" not in task_cols
+        assert "attempts" not in task_cols
 
         async with db.execute(
             "SELECT COUNT(*) FROM migration_log WHERE status='rolled_back'"
         ) as cur:
             (n,) = await cur.fetchone()
-        assert n == 3  # v2、v3、v4
+        assert n == 4  # v2、v3、v4、v5
     finally:
         await db.close()
 
@@ -142,9 +153,9 @@ async def test_downgrade_then_remigrate(tmp_path):
 
         async with db.execute("SELECT status, COUNT(*) FROM migration_log GROUP BY status") as cur:
             counts = dict(await cur.fetchall())
-        # applied：首轮 v1..v4(4) + 回补 v3/v4(2)；rolled_back：v4、v3
-        assert counts["applied"] == SCHEMA_VERSION + 2
-        assert counts["rolled_back"] == 2
+        # applied：首轮 v1..v5(SCHEMA_VERSION) + 回补 v3/v4/v5(3)；rolled_back：v5、v4、v3
+        assert counts["applied"] == SCHEMA_VERSION + 3
+        assert counts["rolled_back"] == 3
     finally:
         await db.close()
 

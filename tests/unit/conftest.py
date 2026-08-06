@@ -16,6 +16,8 @@ os.environ.setdefault("SQLITE_PATH", os.path.join(_TMP, "water.db"))
 # 强制禁用连接池：_fresh_db 每个测试删除 DB 文件重建，
 # 若复用指向旧文件的连接会读到已删除的库（G4.2）
 os.environ["DB_POOL_SIZE"] = "0"
+# 禁用进程内摄取 worker：测试走 TestClient(lifespan) 时不希望后台轮询任务
+os.environ["INGESTION_WORKER_IN_PROCESS"] = "0"
 os.environ.setdefault("CHROMA_PATH", os.path.join(_TMP, "chroma"))
 os.environ.setdefault("DATA_ROOT", _TMP)
 os.environ.setdefault("SOURCE_PATH", os.path.join(_TMP, "source"))

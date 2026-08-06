@@ -24,7 +24,7 @@ from backend.core.logger import get_logger
 logger = get_logger(__name__)
 
 # 当前代码支持的最高 schema 版本
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 async def _ensure_framework_tables(db: aiosqlite.Connection) -> None:
@@ -99,6 +99,9 @@ async def migrate(db: aiosqlite.Connection) -> None:
         if current < 4:
             await _migrate_v4(db)
             applied.append(4)
+        if current < 5:
+            await _migrate_v5(db)
+            applied.append(5)
 
         # 写版本号（DELETE 旧值保证单行；触发器同步 FTS 也兼容）
         await db.execute("DELETE FROM schema_version")
@@ -106,7 +109,7 @@ async def migrate(db: aiosqlite.Connection) -> None:
             "INSERT INTO schema_version (version, description) VALUES (?, ?)",
             (
                 SCHEMA_VERSION,
-                "v4: llm_usage 用量/成本记账表（G3.1 token 成本核算）",
+                "v5: ingestion_tasks 持久化队列列（G4.1 claimed_at/attempts）",
             ),
         )
         # G4.4：每次实际应用的迁移写入审计日志（与版本号同一事务，回滚则一并消失）
@@ -426,9 +429,78 @@ async def _migrate_v4(db: aiosqlite.Connection) -> None:
     logger.info("migrate v4 ok (llm_usage)")
 
 
+async def _migrate_v5(db: aiosqlite.Connection) -> None:
+    # 持久化队列（G4.1）：重建 ingestion_tasks 表——
+    #   status CHECK 加入 'running'（worker 抢占中状态，旧 CHECK 没有）
+    #   新增 claimed_at（租约时间）/ attempts（尝试次数）
+    # SQLite 无法 ALTER CHECK，用标准的"建新表→拷贝→删旧→改名"12 步法。
+    await db.execute(
+        """
+        CREATE TABLE ingestion_tasks_v5 (
+            task_id     TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL,
+            status      TEXT NOT NULL DEFAULT 'pending'
+                        CHECK (status IN ('pending','running','parsing','chunking',
+                                          'embedding','indexing','ready','failed')),
+            error_msg   TEXT,
+            claimed_at  TEXT,
+            attempts    INTEGER NOT NULL DEFAULT 0,
+            started_at  TEXT,
+            finished_at TEXT,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (document_id) REFERENCES documents(document_id) ON DELETE CASCADE
+        )
+        """
+    )
+    await db.execute(
+        """
+        INSERT INTO ingestion_tasks_v5
+            (task_id, document_id, status, error_msg, started_at, finished_at, created_at)
+        SELECT task_id, document_id, status, error_msg, started_at, finished_at, created_at
+        FROM ingestion_tasks
+        """
+    )
+    await db.execute("DROP TABLE ingestion_tasks")
+    await db.execute("ALTER TABLE ingestion_tasks_v5 RENAME TO ingestion_tasks")
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_tasks_doc ON ingestion_tasks(document_id)")
+
+    logger.info("migrate v5 ok (ingestion_tasks queue: running status + claimed_at/attempts)")
+
+
 # ---------------------------------------------------------------------------
 # 降级（G4.4）—— 与升级同源，SQLite DROP COLUMN / DROP TABLE 均为事务性 DDL
 # ---------------------------------------------------------------------------
+
+
+async def _downgrade_v5(db: aiosqlite.Connection) -> None:
+    """v5 → v4：重建 ingestion_tasks 回到 v1 结构（无 running/claimed_at/attempts）。"""
+    await db.execute(
+        """
+        CREATE TABLE ingestion_tasks_v4 (
+            task_id     TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL,
+            status      TEXT NOT NULL DEFAULT 'pending'
+                        CHECK (status IN ('pending','parsing','chunking','embedding',
+                                          'indexing','ready','failed')),
+            error_msg   TEXT,
+            started_at  TEXT,
+            finished_at TEXT,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (document_id) REFERENCES documents(document_id) ON DELETE CASCADE
+        )
+        """
+    )
+    await db.execute(
+        """
+        INSERT INTO ingestion_tasks_v4
+            (task_id, document_id, status, error_msg, started_at, finished_at, created_at)
+        SELECT task_id, document_id, status, error_msg, started_at, finished_at, created_at
+        FROM ingestion_tasks
+        """
+    )
+    await db.execute("DROP TABLE ingestion_tasks")
+    await db.execute("ALTER TABLE ingestion_tasks_v4 RENAME TO ingestion_tasks")
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_tasks_doc ON ingestion_tasks(document_id)")
 
 
 async def _downgrade_v2(db: aiosqlite.Connection) -> None:
@@ -461,6 +533,7 @@ async def _downgrade_v4(db: aiosqlite.Connection) -> None:
 # 降级处理器注册表：version -> handler。
 # 无 v1：降级到 v1 需删除全部基础表（users/documents/chunks/...），属破坏性操作，不支持。
 _DOWNGRADES: dict[int, Callable[[aiosqlite.Connection], Awaitable[None]]] = {
+    5: _downgrade_v5,
     4: _downgrade_v4,
     3: _downgrade_v3,
     2: _downgrade_v2,

@@ -7,8 +7,9 @@ Reference: §8.1
 
 from __future__ import annotations
 
+import asyncio
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from time import perf_counter_ns
 
@@ -24,6 +25,7 @@ from backend.core.logger import get_logger, set_request_id, setup_logging
 from backend.core.metrics import instrument_request
 from backend.db.connection import close_db, get_connection
 from backend.db.migrations import migrate
+from backend.tasks.queue import recover_stale_tasks, worker_loop
 
 # 统一 JSON 结构化日志（幂等，首次导入即完成根 logger 配置）
 setup_logging()
@@ -44,23 +46,19 @@ async def lifespan(app: FastAPI):
         db = await get_connection()
         try:
             await migrate(db)
-            # 摄取状态机恢复：进程上次崩溃/重启后可能卡在中间态
-            # （parsing/chunking/embedding/indexing），统一标记 failed，
-            # 让用户"删除→重传"或直接"重传"重试，避免文档永久卡死。
-            cur = await db.execute(
-                "UPDATE documents SET status='failed', "
-                "error_msg='ingestion interrupted by server restart' "
-                "WHERE status IN ('parsing','chunking','embedding','indexing')"
-            )
-            await db.commit()
-            if cur.rowcount:
-                logger.warning(
-                    "Recovered %s stuck document(s) -> failed (re-upload to retry)", cur.rowcount
-                )
+            # G4.1：恢复上次崩溃遗留的摄取任务（超租约回队 / 超次数终态）
+            recovered = await recover_stale_tasks()
+            if recovered:
+                logger.warning("Recovered %s stale ingestion task(s) on startup", recovered)
         finally:
             await close_db(db)
     except Exception:
         logger.exception("数据库初始化失败（继续启动，功能可能受限）")
+
+    # G4.1：进程内 asyncio worker（本地默认）；生产可另起 scripts.worker 多进程
+    _worker_task: asyncio.Task | None = None
+    if settings.INGESTION_WORKER_IN_PROCESS:
+        _worker_task = asyncio.create_task(worker_loop())
 
     try:
         import chromadb
@@ -80,6 +78,11 @@ async def lifespan(app: FastAPI):
 
     yield
     logger.info("Shutting down...")
+    # 停进程内 worker（先取消再等它退出，避免处理中途被掐）
+    if _worker_task is not None:
+        _worker_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await _worker_task
     # 关闭连接池（G4.2）：不关会导致 aiosqlite 后台线程拖住进程不退出（Docker stop 挂起）
     try:
         from backend.db.connection import _db_pool

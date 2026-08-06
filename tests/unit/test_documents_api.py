@@ -6,6 +6,11 @@ from backend.api.v1 import documents as doc_api
 from backend.main import app
 
 
+async def _noop_ingestion(*a, **k):
+    """摄取入队异步 no-op（测试不真正跑摄取/云端 embedding）。"""
+    return None
+
+
 def _register(c: TestClient, name: str) -> tuple[str, str]:
     r = c.post("/api/v1/auth/register", json={"username": name, "password": "pass123456"})
     body = r.json()
@@ -14,7 +19,7 @@ def _register(c: TestClient, name: str) -> tuple[str, str]:
 
 def test_document_crud(monkeypatch):
     # 不真正跑摄取（会调云端 embedding）
-    monkeypatch.setattr(doc_api, "_spawn_ingestion", lambda *a, **k: None)
+    monkeypatch.setattr(doc_api, "_spawn_ingestion", _noop_ingestion)
     with TestClient(app) as c:
         tok, _ = _register(c, "doc_user")
         h = {"Authorization": f"Bearer {tok}"}
@@ -61,7 +66,7 @@ def test_document_crud(monkeypatch):
 
 def test_document_isolation(monkeypatch):
     """用户 A 上传的文档，用户 B 看不到也删不掉。"""
-    monkeypatch.setattr(doc_api, "_spawn_ingestion", lambda *a, **k: None)
+    monkeypatch.setattr(doc_api, "_spawn_ingestion", _noop_ingestion)
     with TestClient(app) as c:
         tokA, _ = _register(c, "iso_a")
         tokB, _ = _register(c, "iso_b")
@@ -87,7 +92,7 @@ def test_document_isolation(monkeypatch):
 
 
 def test_upload_csrf_origin_blocked(monkeypatch):
-    monkeypatch.setattr(doc_api, "_spawn_ingestion", lambda *a, **k: None)
+    monkeypatch.setattr(doc_api, "_spawn_ingestion", _noop_ingestion)
     with TestClient(app) as c:
         tok, _ = _register(c, "csrf_user")
         r = c.post(

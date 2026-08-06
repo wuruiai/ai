@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
@@ -29,7 +28,8 @@ from backend.core.rate_limit import check_rate_limit
 from backend.core.security import validate_origin
 from backend.db.connection import close_db, get_connection
 from backend.rag.vector_store import vector_store
-from backend.tasks.ingestion_worker import IngestionStatus, ingest_document
+from backend.tasks.ingestion_worker import IngestionStatus
+from backend.tasks.queue import enqueue
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -39,15 +39,12 @@ _ALLOWED_EXTS: set[str] = {".pdf", ".docx", ".txt", ".md"}
 _MAX_FILE_SIZE = 100 * 1024 * 1024  # 100 MB 单文件上限
 
 
-# 保留后台摄取任务引用，防止被 GC 中途回收（官方推荐做法）
-_ingestion_tasks: set[asyncio.Task] = set()
+async def _spawn_ingestion(document_id: str) -> None:
+    """把文档入持久化摄取队列（G4.1）；worker 负责实际执行。
 
-
-def _spawn_ingestion(document_id: str, file_path: Path, user_id: str = "local_user") -> None:
-    """启动后台摄取任务并保留引用；任务完成/异常时自动从集合移除。"""
-    task = asyncio.create_task(_start_ingestion(document_id, file_path, user_id))
-    _ingestion_tasks.add(task)
-    task.add_done_callback(_ingestion_tasks.discard)
+    入队幂等：已存在非终态任务时不重复插入。
+    """
+    await enqueue(document_id)
 
 
 # ---------------------------------------------------------------------------
@@ -136,72 +133,6 @@ async def _count_chunks(db, document_id: str) -> int:
         return int(row[0]) if row else 0
 
 
-async def _start_ingestion(document_id: str, file_path: Path, user_id: str = "local_user") -> None:
-    """后台任务：跑 ingestion_worker，更新 DB 状态。"""
-    # 阶段 1：标记 parsing
-    db = await get_connection()
-    try:
-        await db.execute(
-            "UPDATE documents SET status=?, updated_at=datetime('now') WHERE document_id=?",
-            (IngestionStatus.PARSING.value, document_id),
-        )
-        await db.execute(
-            "INSERT INTO ingestion_tasks (task_id, document_id, status, started_at) "
-            "VALUES (?, ?, ?, datetime('now'))",
-            (str(uuid.uuid4()), document_id, IngestionStatus.PARSING.value),
-        )
-        await db.commit()
-    except Exception:
-        logger.exception("failed to mark %s as parsing", document_id)
-    finally:
-        await close_db(db)
-
-    # 阶段 2：跑真摄取
-    try:
-        status = await ingest_document(file_path, document_id, user_id=user_id)
-    except Exception as e:
-        logger.exception("ingestion crashed for %s", document_id)
-        db_fail = await get_connection()
-        try:
-            await db_fail.execute(
-                "UPDATE documents SET status=?, error_msg=?, updated_at=datetime('now') "
-                "WHERE document_id=?",
-                (IngestionStatus.FAILED.value, str(e)[:500], document_id),
-            )
-            # 收尾 ingestion_tasks（防任务永久卡在 parsing）
-            await db_fail.execute(
-                "UPDATE ingestion_tasks SET status=?, finished_at=datetime('now'), error_msg=? "
-                "WHERE task_id = (SELECT task_id FROM ingestion_tasks "
-                "                 WHERE document_id=? AND finished_at IS NULL "
-                "                 ORDER BY created_at DESC LIMIT 1)",
-                (IngestionStatus.FAILED.value, str(e)[:500], document_id),
-            )
-            await db_fail.commit()
-        finally:
-            await close_db(db_fail)
-        return
-
-    # 阶段 3：写最终状态 + 收尾 task
-    db2 = await get_connection()
-    try:
-        chunk_count = await _count_chunks(db2, document_id)
-        await db2.execute(
-            "UPDATE documents SET status=?, chunk_count=?, error_msg=NULL, "
-            "updated_at=datetime('now') WHERE document_id=?",
-            (status.value, chunk_count, document_id),
-        )
-        await db2.execute(
-            "UPDATE ingestion_tasks SET status=?, finished_at=datetime('now'), error_msg=NULL "
-            "WHERE task_id = (SELECT task_id FROM ingestion_tasks "
-            "                 WHERE document_id=? AND finished_at IS NULL "
-            "                 ORDER BY created_at DESC LIMIT 1)",
-            (status.value, document_id),
-        )
-        await db2.commit()
-    finally:
-        await close_db(db2)
-
-
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -266,7 +197,7 @@ async def upload_document(
         2. 计算 sha256，按 hash 查重
         3. 写文件到 data/source/{document_id}_{filename}
         4. 插入 documents 记录（status=pending，归属当前用户）
-        5. asyncio.create_task 启动 _start_ingestion
+        5. 入持久化摄取队列（_spawn_ingestion），由 worker 异步执行
     """
     # CSRF 防护：multipart/form-data 是 CORS "simple request"（不触发 preflight），
     # 恶意网页可跨站静默向本地注入文件；校验 Origin 必须在本项目白名单内。
@@ -340,11 +271,11 @@ async def upload_document(
             ) as cur2:
                 existing = await cur2.fetchone()
             if existing:
-                doc_id, doc_name, doc_size, doc_status, stored, doc_owner = existing
+                doc_id, doc_name, doc_size, doc_status, stored, _ = existing
                 # 失败/中断的文档允许"重传重试"：重新触发摄取（成功文档保持幂等返回）。
                 # 此前失败/中间态的文档重复上传只会拿回旧状态，摄取永远不会重跑。
                 if doc_status != IngestionStatus.READY.value and stored:
-                    _spawn_ingestion(doc_id, Path(stored), user_id=doc_owner or user.user_id)
+                    await _spawn_ingestion(doc_id)
                     return DocumentUploadResponse(
                         document_id=doc_id,
                         file_name=doc_name,
@@ -372,8 +303,8 @@ async def upload_document(
         detail=file.filename,
     )
 
-    # 启动后台 ingestion（保留引用防 GC 回收）
-    _spawn_ingestion(document_id, stored_path, user_id=user.user_id)
+    # 入持久化摄取队列（worker 异步执行）
+    await _spawn_ingestion(document_id)
 
     return DocumentUploadResponse(
         document_id=document_id,
