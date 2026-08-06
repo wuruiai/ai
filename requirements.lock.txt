@@ -1,0 +1,42 @@
+# 水利 RAG + Agent 锁定依赖
+# 生成时间: 2026-08-01
+# Python 版本: 3.11.x
+
+# Web 框架
+fastapi==0.117.1
+uvicorn[standard]==0.32.1
+python-multipart==0.0.18
+
+# LangChain 生态
+langgraph==1.0.9
+langchain-core==1.2.16
+langchain-openai==1.1.10
+langchain-text-splitters==1.1.1
+
+# OpenAI SDK
+openai==2.46.0
+
+# 文档解析
+PyMuPDF==1.24.14
+python-docx==1.1.2
+
+# 向量数据库
+chromadb==0.6.3
+
+# 数据验证
+pydantic==2.10.4
+pydantic-settings==2.7.1
+
+# 数据库
+aiosqlite==0.21.0
+
+# 工具库
+httpx==0.28.1
+python-dotenv==1.1.0
+tenacity==9.1.2
+tiktoken==0.9.0
+
+# 测试
+pytest==8.3.4
+pytest-asyncio==0.25.0
+pytest-cov==6.1.1

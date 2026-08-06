@@ -1,0 +1,44 @@
+# Ruff lint / format 策略（CI 门禁据此执行）
+# 目标：Python 3.11 风格现代化 + 常见陷阱，同时把合法惯用法白名单化。
+
+target-version = "py311"
+line-length = 100
+
+[lint]
+# 在默认 F/E/W 基础上扩展：modern 注解(UP)、import 排序(I)、bugbear(B)、
+# 安全(S)、时区(DTZ)、日志(G)、简化(PIE)、RUF 通用。
+select = ["E", "W", "F", "I", "UP", "B", "RUF", "S", "DTZ", "G", "PIE", "BLE"]
+
+# 项目级豁免（都有明确理由）
+ignore = [
+  "DTZ005",  # SQLite datetime('now') 存无时区 UTC 是本项目约定（前端按 UTC 解析，见 stores/chat.ts）
+  "DTZ011",  # 同上
+  "RUF001",  # 中文业务字符串必然命中"含歧义 unicode 字符"，本项目以中文为核心内容，全量豁免
+  "RUF002",  # 同上：中文 docstring 全部命中
+  "RUF003",  # 同上：中文注释全部命中
+]
+
+[lint.per-file-ignores]
+"tests/**" = [
+  "S101",  # 测试用 assert 是标准做法（pytest 依赖 assert 收集失败信息）
+  "S105",  # 测试里写硬编码测试密码是常规做法
+]
+"scripts/**" = [
+  "S101",  # 脚本里用 assert 做前置校验（fail-fast 风格）
+  "BLE001",  # 诊断/运维脚本捕获一切异常以报告 FAIL/WARN 状态，这正是脚本的目的
+]
+"backend/agents/**/state.py" = [
+  "RUF012",  # LangGraph 状态 schema（TypedDict）的字段默认值约定：missing 时按此补全，运行期深拷贝，非共享可变对象
+]
+
+[lint.flake8-bugbear]
+# FastAPI 依赖注入惯用法：Depends()/Header()/Query() 等作为函数默认参数是合法模式
+extend-immutable-calls = [
+  "fastapi.Depends",
+  "fastapi.Header",
+  "fastapi.Query",
+  "fastapi.Path",
+  "fastapi.File",
+  "fastapi.Form",
+  "fastapi.Body",
+]

@@ -1,0 +1,15 @@
+# 统一行尾：仓库内一律 LF（Windows checkout 时自动转 CRLF，提交时还原 LF）
+* text=auto
+
+*.py text eol=lf
+*.ts text eol=lf
+*.vue text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf
+*.sh text eol=lf
+Dockerfile text eol=lf
+.nginx.conf text eol=lf
+*.lock text eol=lf

@@ -1,0 +1,22 @@
+services:
+  backend:
+    build: .
+    ports:
+      - "8001:8001"
+    env_file: .env
+    environment:
+      - APP_HOST=0.0.0.0
+      - FRONTEND_ORIGIN=http://localhost,http://127.0.0.1
+    volumes:
+      - ./data:/app/data   # SQLite + Chroma + source 持久化
+    restart: unless-stopped
+    # 健康检查在 Dockerfile 中定义；此处仅依赖 compose 服务级健康状态
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+    depends_on:
+      backend:
+        condition: service_healthy   # 等后端就绪再起，避免 nginx 空转
+    restart: unless-stopped

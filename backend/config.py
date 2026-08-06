@@ -1,0 +1,90 @@
+"""单一配置中心
+
+使用 pydantic-settings 管理所有配置项。
+
+Reference: §3.2
+"""
+
+from functools import lru_cache
+
+from pydantic_settings import BaseSettings
+
+
+class Settings(BaseSettings):
+    """应用配置"""
+
+    # 应用基础
+    APP_ENV: str = "local"
+    APP_HOST: str = "127.0.0.1"
+    APP_PORT: int = 8001
+    # token 签名 secret：留空则进程级随机（重启后旧 token 失效）；
+    # 生产建议在 .env 设固定值，重启后登录态保持
+    TOKEN_SECRET: str = ""
+    LOG_LEVEL: str = "INFO"
+    DATA_ROOT: str = "./data"
+    # 允许的前端 Origin，逗号分隔。默认同时允许 localhost 与 127.0.0.1：
+    # 开发机 Vite(host:0.0.0.0) 两个地址都能访问，两个 Origin 都会被浏览器带上。
+    FRONTEND_ORIGIN: str = "http://127.0.0.1:5173,http://localhost:5173"
+    # 额外允许的 Origin（逗号分隔）。生产留空；smoke_test / 灰度场景按需注入。
+    # 用法：EXTRA_ALLOWED_ORIGINS="http://127.0.0.1:8123,http://staging.example.com"
+    EXTRA_ALLOWED_ORIGINS: str = ""
+
+    @property
+    def allowed_origins(self) -> set[str]:
+        """全部允许的 Origin（FRONTEND_ORIGIN + EXTRA_ALLOWED_ORIGINS，均支持逗号分隔）。
+
+        CORS / auth / security 三处统一从这里取，避免白名单不一致。
+        """
+        origins: set[str] = set()
+        for raw in (self.FRONTEND_ORIGIN, self.EXTRA_ALLOWED_ORIGINS):
+            for o in raw.split(","):
+                o = o.strip()
+                if o:
+                    origins.add(o)
+        return origins
+
+    # DashScope 云服务
+    DASHSCOPE_API_KEY: str = ""
+    LLM_MODEL: str = "qwen-plus"
+    LLM_MODEL_HARD: str = "qwen-max"
+    EMBEDDING_MODEL: str = "text-embedding-v3"
+    EMBEDDING_DIM: int = 1024
+    RERANK_MODEL: str = "gte-rerank"
+
+    # 超时/重试/预算
+    HTTP_TRUST_ENV: bool = False
+    LLM_TIMEOUT_S: int = 60
+    MAX_RETRIES: int = 2
+    MAX_AGENT_STEPS: int = 12
+    MAX_MULTI_QUERIES: int = 3
+    DAILY_CALL_LIMIT: int = 1000
+    # 每用户每分钟请求上限（chat/upload 等重端点）
+    RATE_LIMIT_PER_MINUTE: int = 30
+
+    # 本地数据路径
+    SQLITE_PATH: str = "./data/water.db"
+    CHROMA_PATH: str = "./data/chroma"
+    CHROMA_COLLECTION: str = "water_knowledge"
+    SOURCE_PATH: str = "./data/source"
+    LOG_PATH: str = "./data/logs"
+    BACKUP_PATH: str = "./data/backups"
+
+    # 检索初始参数
+    DENSE_TOP_K: int = 30
+    BM25_TOP_K: int = 30
+    DENSE_WEIGHT: float = 0.7
+    SPARSE_WEIGHT: float = 0.3
+    RERANK_TOP_K: int = 8
+
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+
+
+@lru_cache
+def get_settings() -> Settings:
+    """获取配置单例"""
+    return Settings()
+
+
+settings = get_settings()
