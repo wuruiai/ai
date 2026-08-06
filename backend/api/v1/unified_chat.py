@@ -256,6 +256,12 @@ async def unified_chat(
         },
         pipeline_mode=request.pipeline_mode,
     )
+    # 持久化用户消息（加载历史之后才写，历史不含当前轮；失败不阻塞回答）
+    try:
+        await _save_user_message(request.session_id, request.message, user_id=user.user_id)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("save user msg failed: %s", e)
+
     try:
         response = await orchestrator.handle(agent_request)
     except Exception:
@@ -273,4 +279,18 @@ async def unified_chat(
 
     # 完成一次 orchestrator 调用即计入当日额度（每用户）
     budget_manager.record_call(user.user_id, settings.LLM_MODEL)
+
+    # 非流式同样落库消息（修复：此前从不 _save_user/_save_assistant_message——
+    # 会话不进线程列表、多轮记忆丢该轮、反馈无目标）。与流式端点对齐：
+    # 用户消息在加载历史后、调用前写入（历史不含当前轮）；助手消息仅在成功时写。
+    if response.success:
+        try:
+            await _save_assistant_message(
+                request.session_id,
+                response.content or "",
+                request.agent_type,
+                user_id=user.user_id,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("save assistant msg failed: %s", e)
     return response

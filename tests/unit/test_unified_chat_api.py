@@ -33,6 +33,44 @@ def test_unified_chat_non_stream(monkeypatch):
         assert r.json()["content"] == "unified answer"
 
 
+def test_unified_chat_non_stream_persists_messages(monkeypatch):
+    """S2：非流式端点同样落库 user + assistant 消息。
+
+    修复前非流式从不 _save_user/_save_assistant_message——会话不进线程列表、
+    多轮记忆丢该轮、反馈无目标。修复后与流式端点对齐：线程列表可见且含完整对话。
+    """
+    monkeypatch.setattr(uc, "get_orchestrator", lambda: _FakeOrch())
+    with TestClient(app) as c:
+        r = c.post(
+            "/api/v1/auth/register", json={"username": "persist_user", "password": "pass123456"}
+        )
+        tok = r.json()["token"]
+        h = {"Authorization": f"Bearer {tok}"}
+
+        r = c.post(
+            "/api/v1/unified-chat/",
+            json={"message": "水库调度规则", "session_id": "s_persist"},
+            headers=h,
+        )
+        assert r.status_code == 200
+        assert r.json()["content"] == "unified answer"
+
+        # 会话出现在线程列表（此前完全不落库，线程列表为空）
+        r = c.get("/api/v1/threads/", headers=h)
+        assert r.status_code == 200
+        thread_ids = [t["thread_id"] for t in r.json()["threads"]]
+        assert "s_persist" in thread_ids
+
+        # 会话消息含用户提问 + 助手回复（多轮记忆/反馈的数据来源）
+        r = c.get("/api/v1/threads/s_persist/messages", headers=h)
+        assert r.status_code == 200
+        msgs = r.json()["messages"]
+        assert [m["role"] for m in msgs] == ["user", "assistant"]
+        contents = {m["role"]: m["content"] for m in msgs}
+        assert contents["user"] == "水库调度规则"
+        assert contents["assistant"] == "unified answer"
+
+
 def test_unified_chat_stream(monkeypatch):
     """流式端点：预算/用量链已接好，token 事件 + done 正常。"""
 
