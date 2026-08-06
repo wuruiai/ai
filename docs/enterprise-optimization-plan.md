@@ -421,6 +421,11 @@
 
 ## Phase 7 — 清理与配置补全
 
+> **实施状态(2026-08-06)**:Phase 7 全部完成 —— G7.1 ✅ / G7.2 ✅
+>
+> - **G7.1 死代码清理**:删除 `backend/core/memory.py`、`backend/core/retry.py`(tenacity 仅作 langchain 传递依赖保留);移除 `model_factory.create_embedding` 与 `db/connection.py` 的 `connection_scope` 及孤儿 import。`rag/citation.py` 经 grep 确认被 `chat.py:46` 引用 → 保留。
+> - **G7.2 配置收口**:`DASHSCOPE_BASE_URL`/`DASHSCOPE_RERANK_URL`/`APP_VERSION` 收口到 `backend/config.py`,`model_factory`/`embedding`/`reranker`/`health`/`main` 统一读取;`.env.example` 与 `Settings` 全字段覆盖核对完成(仅 `EXTRA_ALLOWED_ORIGINS`、`REDIS_URL` 为注释形式的按需可选项,符合设计)。
+
 ### G7.1 死代码清理
 - **现状**(探索确认):`backend/core/memory.py`(全文件无人 import)、`backend/core/retry.py`(`create_retry_decorator` 无人用)、`model_factory.create_embedding`(embedding.py 绕过 LangChain)、`rag/citation.py`(G3.2 落地后复用)、`connection_scope`(G4.2 落地后复用)。
 - **改法**:`memory.py`、`retry.py` 直接删除(retry 逻辑可并入 `http_client.py` 的 httpx 重试);其余随对应 Phase 复活。
