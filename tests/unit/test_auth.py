@@ -207,6 +207,41 @@ def test_login_brute_force_lockout():
         assert r.status_code == 429
 
 
+def test_login_lockout_scoped_to_source_ip():
+    """S1：用户名锁定按来源 IP 隔离——IP A 的 5 次失败只锁 (A, 账户) 组合，
+    不再全局锁死账户：IP B 用正确密码仍可登录（修复前 user:{username} 无 IP 前缀，
+    任意来源 IP 凑满 5 次即可远程锁死该账户并循环续期）。"""
+    with TestClient(app) as c:
+        _register(c, "scope_victim")
+        attacker = {"X-Forwarded-For": "198.51.100.10"}
+
+        for _ in range(5):
+            r = c.post(
+                "/api/v1/auth/login",
+                json={"username": "scope_victim", "password": "wrong"},
+                headers=attacker,
+            )
+            assert r.status_code == 401
+
+        # 攻击者来源 IP 对该账户已锁定（user:{ip}:scope_victim + ip:{ip} 双维度）
+        r = c.post(
+            "/api/v1/auth/login",
+            json={"username": "scope_victim", "password": "pass123456"},
+            headers=attacker,
+        )
+        assert r.status_code == 429
+        assert int(r.headers["Retry-After"]) >= 1
+
+        # 不同来源 IP 不受该锁定影响：正确密码仍可登录（S1 回归点）
+        r = c.post(
+            "/api/v1/auth/login",
+            json={"username": "scope_victim", "password": "pass123456"},
+            headers={"X-Forwarded-For": "198.51.100.11"},
+        )
+        assert r.status_code == 200
+        assert r.json()["access_token"]
+
+
 def test_register_rate_limited_by_ip():
     """G10.5 M3：注册按 IP 滑动窗口限流——窗口内第 N+1 次注册返回 429。
 

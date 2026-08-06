@@ -388,8 +388,13 @@ async def login(req: LoginRequest, request: Request) -> dict:
     # 登录防爆破：ip|username 双维度（懒加载避免 auth↔rate_limit 循环导入）
     from backend.core.rate_limit import login_throttle
 
-    ip_key = f"ip:{_client_ip(request) or 'unknown'}"
-    user_key = f"user:{req.username}"
+    ip = _client_ip(request) or "unknown"
+    ip_key = f"ip:{ip}"
+    # 用户名维度锁定必须携带来源 IP 前缀（S1）：修复前 user:{username} 是全局 key，
+    # 任意来源 IP 凑满 5 次错误即可把该账户全局锁定（配合继续刷失败可永久续期 DoS）。
+    # 与 LoginThrottle 文档"key 始终携带 ip 前缀，同一账户的锁定只影响该来源 IP"对齐——
+    # 锁定仅作用于 (来源 IP, 账户) 组合；跨 IP 撞库仍由 ip:{ip} 维度兜底（单 IP 5 次即锁）。
+    user_key = f"user:{ip}:{req.username}"
     login_throttle.check(ip_key)
     login_throttle.check(user_key)
 
