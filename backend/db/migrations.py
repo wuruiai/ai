@@ -49,7 +49,6 @@ async def migrate(db: aiosqlite.Connection) -> None:
 
     if current == SCHEMA_VERSION:
         logger.info("no migration needed.")
-        print("no migration needed.")
         return
 
     await db.execute("BEGIN")
@@ -87,7 +86,6 @@ async def migrate(db: aiosqlite.Connection) -> None:
         raise
 
     logger.info("migrated to v%d", SCHEMA_VERSION)
-    print(f"migrate to v{SCHEMA_VERSION} ok")
 
 
 # ---------------------------------------------------------------------------
@@ -242,7 +240,7 @@ async def _migrate_v1(db: aiosqlite.Connection) -> None:
     )
     await db.execute("CREATE INDEX IF NOT EXISTS idx_tasks_doc ON ingestion_tasks(document_id)")
 
-    print("seed local_user ok")
+    logger.info("seed local_user ok")
 
 
 # ---------------------------------------------------------------------------
@@ -290,7 +288,7 @@ async def _migrate_v2(db: aiosqlite.Connection) -> None:
     await db.execute("CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id, created_at)")
     await db.execute("CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action, created_at)")
 
-    print("migrate v2 ok (RBAC + 数据归属 + 审计 + 知识库结构化)")
+    logger.info("migrate v2 ok (RBAC + 数据归属 + 审计 + 知识库结构化)")
 
 
 # ---------------------------------------------------------------------------
@@ -317,4 +315,4 @@ async def _migrate_v3(db: aiosqlite.Connection) -> None:
     )
     await db.execute("CREATE INDEX IF NOT EXISTS idx_refresh_user ON refresh_tokens(user_id)")
 
-    print("migrate v3 ok (token_version + refresh_tokens)")
+    logger.info("migrate v3 ok (token_version + refresh_tokens)")

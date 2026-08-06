@@ -30,6 +30,9 @@ pydantic-settings==2.7.1
 # 认证（标准 JWT）
 PyJWT==2.10.1
 
+# 可观测性（Prometheus /metrics）
+prometheus-client==0.26.0
+
 # 数据库
 aiosqlite==0.21.0
 

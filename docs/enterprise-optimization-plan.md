@@ -137,6 +137,19 @@
 
 ## Phase 2 — 可观测性
 
+> **实施状态(2026-08-06)**:G2.1 ✅ / G2.2 ✅ / G2.3 ✅ / G2.4 ✅
+>
+> 实现要点(与下面"改法"的出入以实际代码为准):
+> - G2.1: `logger.py` 重构为**根 logger 单次配置**(幂等 `setup_logging`),`JsonFormatter` 输出单行 JSON
+>   (UTC 毫秒时间戳 + level + logger + message + request_id + exc_info),`request_id` 走 `ContextVar`。
+>   文件日志为按天命名 JSON 文件(未用 TimedRotatingFileHandler,保留策略简单起见按天自然轮换)。
+> - G2.2: `prometheus-client==0.26.0`;`backend/core/metrics.py` 提供 `http_requests_total` +
+>   `http_request_duration_seconds`;`main.py` 中间件打点;**路径归一化**(UUID/长 hex/长数字 → `{id}`)
+>   防标签基数爆炸;**/metrics 自身不计数**。`GET /metrics` 免令牌(标准抓取方式,可后续加 bearer)。
+> - G2.3: `/health` 纯存活探针(零依赖,供 docker HEALTHCHECK);`/health/ready` 查 SQLite+Chroma
+>   全可达才 200 否则 503。version 仍硬编码(未接 importlib.metadata,见 G7.2 收口)。
+> - G2.4: `main.py` / `migrations.py` 全部 `print` → `logger`(`logger.exception` 带堆栈)。
+
 ### G2.1 结构化 JSON 日志 + request_id 贯穿
 - **现状**:`backend/core/logger.py` docstring 声称 JSON 结构化,实际是纯文本;每次 `get_logger()` 重复挂 handler;`request_id` 中间件生成了但从未进日志;`main.py` 用 `print`。
 - **改法**:

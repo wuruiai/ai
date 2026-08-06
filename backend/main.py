@@ -10,6 +10,7 @@ from __future__ import annotations
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
+from time import perf_counter_ns
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -19,8 +20,14 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.api.router import api_router
 from backend.config import settings
+from backend.core.logger import get_logger, set_request_id, setup_logging
+from backend.core.metrics import instrument_request
 from backend.db.connection import close_db, get_connection
 from backend.db.migrations import migrate
+
+# 统一 JSON 结构化日志（幂等，首次导入即完成根 logger 配置）
+setup_logging()
+logger = get_logger(__name__)
 
 # 前端构建产物目录（npm run build 输出）
 _FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
@@ -32,7 +39,7 @@ async def lifespan(app: FastAPI):
     # 生产环境密钥强校验：缺失关键 secret 直接拒绝启动（G1.3 fail-fast）
     settings.ensure_secrets()
     # 启动时：确保数据库迁移完成（幂等）、Chroma 集合可用
-    print("Starting Water RAG + Agent...")
+    logger.info("Starting Water RAG + Agent (app=%s)", app.title)
     try:
         db = await get_connection()
         try:
@@ -47,11 +54,13 @@ async def lifespan(app: FastAPI):
             )
             await db.commit()
             if cur.rowcount:
-                print(f"Recovered {cur.rowcount} stuck document(s) -> failed (re-upload to retry)")
+                logger.warning(
+                    "Recovered %s stuck document(s) -> failed (re-upload to retry)", cur.rowcount
+                )
         finally:
             await close_db(db)
-    except Exception as e:  # noqa: BLE001
-        print(f"WARN: 数据库初始化失败（继续启动，功能可能受限）: {e}")
+    except Exception:
+        logger.exception("数据库初始化失败（继续启动，功能可能受限）")
 
     try:
         import chromadb
@@ -66,11 +75,11 @@ async def lifespan(app: FastAPI):
             settings=ChromaSettings(anonymized_telemetry=False),
         )
         client.get_or_create_collection(settings.CHROMA_COLLECTION)
-    except Exception as e:  # noqa: BLE001
-        print(f"WARN: Chroma 初始化失败: {e}")
+    except Exception:
+        logger.exception("Chroma 初始化失败")
 
     yield
-    print("Shutting down...")
+    logger.info("Shutting down...")
 
 
 app = FastAPI(
@@ -92,9 +101,22 @@ app.add_middleware(
 
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
-    """请求中间件：注入 X-Request-ID，便于链路追踪/排查。"""
+    """请求中间件：注入 X-Request-ID + 打点 Prometheus 指标。
+
+    - 把 request_id 写入 contextvar，让本请求内所有结构化日志自动携带该字段（G2.1）。
+    - 统计每个请求的耗时/状态码/路径到 http_requests_total / http_request_duration_seconds（G2.2）。
+    """
     request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
-    response = await call_next(request)
+    set_request_id(request_id)
+    start_ns = perf_counter_ns()
+    status = 500
+    try:
+        response = await call_next(request)
+        status = response.status_code
+    finally:
+        # 无论成功/异常都打点；异常时 call_next 抛错，状态记为 500 后继续上抛
+        duration_s = (perf_counter_ns() - start_ns) / 1e9
+        instrument_request(request.method, request.url.path, status, duration_s)
     response.headers["X-Request-ID"] = request_id
     return response
 
@@ -174,5 +196,7 @@ if _FRONTEND_DIST.exists():
         return FileResponse(dist_root / "index.html")
 
 else:
-    print(f"WARN: frontend/dist 不存在（{_FRONTEND_DIST}），跳过静态伺服。")
-    print("      开发模式请用: cd frontend && npm run dev（http://localhost:5173）")
+    logger.warning(
+        "frontend/dist 不存在（%s），跳过静态伺服。开发模式请用: cd frontend && npm run dev",
+        _FRONTEND_DIST,
+    )

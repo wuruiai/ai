@@ -1,12 +1,18 @@
-"""GET /health（免令牌）
+"""健康检查 / 就绪检查 / Prometheus 指标（免令牌）
 
-健康检查接口。
+- `GET /health`        存活探针：进程在即 200（供 docker HEALTHCHECK / 负载均衡探活）
+- `GET /health/ready`  就绪探针：SQLite + Chroma 依赖可达才 200，否则 503（供编排系统摘流）
+- `GET /metrics`       Prometheus 指标文本（G2.2，供抓取）
 
-Reference: §9.6
+Reference: §9.6 / §3.4
 """
 
-from fastapi import APIRouter
+from __future__ import annotations
 
+from fastapi import APIRouter, Response, status
+from fastapi.responses import JSONResponse
+
+from backend.core.metrics import render_metrics
 from backend.db.migrations import SCHEMA_VERSION
 
 router = APIRouter()
@@ -39,11 +45,34 @@ async def _check_deps() -> dict:
 
 @router.get("/health")
 async def health_check():
-    """健康检查（含 DB / Chroma 依赖状态）。"""
-    checks = await _check_deps()
+    """存活探针：进程在即 200（不含依赖检查，保持零成本、可高频探测）。"""
     return {
-        "status": "ok" if all(checks.values()) else "degraded",
+        "status": "ok",
         "version": "1.0.0",
         "schema_version": SCHEMA_VERSION,
-        "checks": checks,
     }
+
+
+@router.get("/health/ready")
+async def health_ready():
+    """就绪探针：依赖（SQLite / Chroma）全部可达才 200，否则 503。"""
+    checks = await _check_deps()
+    ready = all(checks.values())
+    return JSONResponse(
+        status_code=status.HTTP_200_OK if ready else status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={
+            "status": "ready" if ready else "not_ready",
+            "version": "1.0.0",
+            "schema_version": SCHEMA_VERSION,
+            "checks": checks,
+        },
+    )
+
+
+@router.get("/metrics")
+async def metrics():
+    """Prometheus 指标（OpenMetrics 文本）。"""
+    return Response(
+        content=render_metrics(),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )

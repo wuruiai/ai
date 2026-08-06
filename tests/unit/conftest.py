@@ -16,6 +16,8 @@ os.environ.setdefault("SQLITE_PATH", os.path.join(_TMP, "water.db"))
 os.environ.setdefault("CHROMA_PATH", os.path.join(_TMP, "chroma"))
 os.environ.setdefault("DATA_ROOT", _TMP)
 os.environ.setdefault("SOURCE_PATH", os.path.join(_TMP, "source"))
+# 日志落到临时目录，避免测试污染真实 ./data/logs
+os.environ.setdefault("LOG_PATH", os.path.join(_TMP, "logs"))
 # 假 key：单测不调云端；仅用于绕过“空 key”相关分支
 os.environ.setdefault("DASHSCOPE_API_KEY", "unit-test-fake-key")
 os.environ.setdefault("DAILY_CALL_LIMIT", "1000")
