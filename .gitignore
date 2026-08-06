@@ -24,8 +24,8 @@ ENV/
 .coverage
 htmlcov/
 
-# 数据目录
-data/
+# 数据目录（保留目录占位 .gitkeep，其余运行时数据不入库）
+data/*
 !data/.gitkeep
 
 # 前端
