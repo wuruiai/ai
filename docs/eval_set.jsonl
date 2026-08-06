@@ -1,0 +1,8 @@
+{"question": "根据防汛预案，当水库水位达到什么条件时应启动泄洪调度？", "expected_docs": ["防汛应急调度预案", "水库调度规程"], "answer_fragment": "泄洪调度"}
+{"question": "地表水环境质量标准中Ⅲ类水的总磷浓度限值是多少？", "expected_docs": ["地表水环境质量标准", "水质监测技术规范"], "answer_fragment": "总磷"}
+{"question": "本地区主要农作物玉米的灌溉定额是多少方每亩？", "expected_docs": ["农业灌溉用水定额"], "answer_fragment": "灌溉定额"}
+{"question": "泵站开机前应进行哪些检查项目？", "expected_docs": ["泵站运行管理规程"], "answer_fragment": "开机前检查"}
+{"question": "河长制年度考核评分细则中对水质达标率的考核权重是多少？", "expected_docs": ["河长制工作考核办法"], "answer_fragment": "水质达标率"}
+{"question": "小型水库的设计洪水标准采用多少年一遇？", "expected_docs": ["水利水电工程设计洪水计算规范", "小型水库安全运行管理规程"], "answer_fragment": "设计洪水标准"}
+{"question": "防汛值班期间接到险情报告后应在多长时间内完成上报？", "expected_docs": ["防汛值班制度"], "answer_fragment": "险情上报"}
+{"question": "生产建设项目水土保持方案中防治责任范围的划定依据是什么？", "expected_docs": ["开发建设项目水土保持技术规范"], "answer_fragment": "防治责任范围"}
