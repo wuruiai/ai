@@ -172,14 +172,22 @@ def require_admin(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
 # ---------------------------------------------------------------------------
 
 
-async def _revoke_refresh_token(token_id: str) -> None:
+async def _revoke_refresh_token(token_id: str, user_id: str) -> int:
+    """吊销 refresh token；返回受影响行数（0/1）。
+
+    `AND revoked_at IS NULL` 保证吊销只成功一次：并发轮换/登出/重放同一 token 时，
+    只有一个调用能更新到行（rowcount=1），其余 rowcount=0。调用方用返回值做
+    "是否已被用掉"的权威判断，从根上杜绝轮换双花。
+    """
     db = await get_connection()
     try:
-        await db.execute(
-            "UPDATE refresh_tokens SET revoked_at=? WHERE token_id=?",
-            (int(time.time()), token_id),
+        cur = await db.execute(
+            "UPDATE refresh_tokens SET revoked_at=? "
+            "WHERE token_id=? AND user_id=? AND revoked_at IS NULL",
+            (int(time.time()), token_id, user_id),
         )
         await db.commit()
+        return cur.rowcount
     finally:
         await close_db(db)
 
@@ -392,24 +400,22 @@ async def refresh(req: RefreshRequest) -> dict:
             "SELECT username, role, token_version FROM users WHERE id=? LIMIT 1", (user_id,)
         ) as cur:
             user_row = await cur.fetchone()
-        async with db.execute(
-            "SELECT revoked_at FROM refresh_tokens WHERE token_id=? AND user_id=?",
-            (payload["jti"], user_id),
-        ) as cur:
-            rt_row = await cur.fetchone()
     finally:
         await close_db(db)
 
     if user_row is None:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
-    if payload.get("ver") != user_row[2] or rt_row is None or rt_row[0] is not None:
-        # 已吊销 / token_version 已变 → 整体拒绝（不回显具体原因）
+    if payload.get("ver") != user_row[2]:
         raise HTTPException(status_code=401, detail="Refresh token revoked")
     if int(payload.get("exp", 0)) < int(time.time()):
         raise HTTPException(status_code=401, detail="Refresh token expired")
 
-    # 轮换：旧 refresh 一次性，避免重放
-    await _revoke_refresh_token(payload["jti"])
+    # 轮换即吊销：条件 UPDATE 原子化，作为"是否已被用掉"的权威闸门。
+    # 同一 refresh token 并发重放时，仅一个请求 update 成功（rowcount=1），
+    # 其余 rowcount=0 → 401，杜绝双花（此前"先读已吊销状态再写"存在竞态窗口）。
+    if await _revoke_refresh_token(payload["jti"], user_id) == 0:
+        raise HTTPException(status_code=401, detail="Refresh token revoked")
+
     username, role = user_row[0], user_row[1]
     access, new_refresh = await _issue_tokens(user_id, username, role)
     await write_audit(
@@ -436,7 +442,7 @@ async def logout(
         payload = _decode_token(req.refresh_token, "refresh")
         if payload.get("sub") != user.user_id:
             raise HTTPException(status_code=400, detail="refresh token 不属于当前用户")
-        await _revoke_refresh_token(payload["jti"])
+        await _revoke_refresh_token(payload["jti"], user.user_id)
     await write_audit(
         "auth.logout",
         user_id=user.user_id,

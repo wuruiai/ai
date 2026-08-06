@@ -14,6 +14,9 @@
 - **三 Agent 用量全记账**：`document_analysis`、`water_expert` 的 LLM 调用接入
   `llm_callbacks` 用量链，与 `knowledge_qa` 一致——任意 Agent / 任意入口的 token 用量
   都落 `llm_usage` 表，成本可见无死角。
+- **refresh 轮换原子化（G9.2）**：吊销 refresh token 改为条件 `UPDATE ... AND revoked_at
+  IS NULL` + rowcount 判定，作为"是否已被用掉"的权威闸门——并发重放同一 refresh token
+  时仅一次成功，其余 401，杜绝轮换双花。
 
 ## [1.1.0] - 2026-08-06
 

@@ -107,6 +107,31 @@ def test_refresh_rotation_and_reuse_detection():
         assert r.status_code == 200
 
 
+async def test_refresh_revoke_gate_is_atomic():
+    """轮换吊销原子化：同一 refresh token 只允许一个吊销调用成功（并发双花防护）。
+
+    模拟两个并发请求同时轮换同一 refresh token：第一个原子吊销成功（rowcount=1），
+    第二个返回 0（已被用掉）；随后用该 token 调 /refresh 必然 401。
+    """
+    import jwt as pyjwt
+
+    from backend.api.v1 import auth as auth_api
+
+    with TestClient(app) as c:
+        body = _register(c, "frank")
+        refresh = body["refresh_token"]
+        user_id = body["user"]["user_id"]
+        payload = pyjwt.decode(refresh, auth_api._process_secret, algorithms=["HS256"])
+
+        # 并发双请求：仅第一个能吊销成功
+        assert await auth_api._revoke_refresh_token(payload["jti"], user_id) == 1
+        assert await auth_api._revoke_refresh_token(payload["jti"], user_id) == 0
+
+        # 已被吊销 → 重放 refresh 换新 401，绝不双花
+        r = c.post("/api/v1/auth/refresh", json={"refresh_token": refresh})
+        assert r.status_code == 401
+
+
 def test_logout_revokes_refresh():
     with TestClient(app) as c:
         body = _register(c, "dave")
