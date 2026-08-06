@@ -338,3 +338,72 @@ async def admin_stats_daily(
         messages=[int(msg_map.get(d, 0)) for d in day_list],
         uploads=[int(doc_map.get(d, 0)) for d in day_list],
     )
+
+
+# ---------------------------------------------------------------------------
+# LLM 用量 / 成本（G3.1）
+# ---------------------------------------------------------------------------
+
+
+class UsageDay(BaseModel):
+    day: str
+    calls: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_cny: float = 0.0
+
+
+class UsageSummary(BaseModel):
+    total_calls: int = 0
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_cost_cny: float = 0.0
+    days: list[UsageDay] = Field(default_factory=list)
+
+
+@router.get("/usage", response_model=UsageSummary)
+async def admin_usage(
+    _admin: CurrentUser = Depends(require_admin),
+    days: int = 14,
+) -> UsageSummary:
+    """LLM token 用量与成本汇总（近 N 天趋势 + 累计）。"""
+    days = max(1, min(days, 90))
+    db = await get_connection()
+    try:
+        async with db.execute(
+            "SELECT COUNT(*), COALESCE(SUM(input_tokens),0), "
+            "COALESCE(SUM(output_tokens),0), COALESCE(SUM(cost_cny),0) "
+            "FROM llm_usage"
+        ) as cur:
+            total = (await cur.fetchone()) or (0, 0, 0, 0)
+        async with db.execute(
+            "SELECT date(created_at) d, COUNT(*), SUM(input_tokens), "
+            "SUM(output_tokens), SUM(cost_cny) FROM llm_usage "
+            "WHERE created_at >= date('now', ?) GROUP BY d",
+            (f"-{days - 1} days",),
+        ) as cur:
+            rows = await cur.fetchall()
+    finally:
+        await close_db(db)
+
+    day_data = {
+        r[0]: (int(r[1] or 0), int(r[2] or 0), int(r[3] or 0), float(r[4] or 0)) for r in rows
+    }
+    today = date.today()
+    day_list = [(today - timedelta(days=i)).isoformat() for i in range(days - 1, -1, -1)]
+    return UsageSummary(
+        total_calls=int(total[0] or 0),
+        total_input_tokens=int(total[1] or 0),
+        total_output_tokens=int(total[2] or 0),
+        total_cost_cny=round(float(total[3] or 0), 4),
+        days=[
+            UsageDay(
+                day=d,
+                calls=day_data.get(d, (0, 0, 0, 0.0))[0],
+                input_tokens=day_data.get(d, (0, 0, 0, 0.0))[1],
+                output_tokens=day_data.get(d, (0, 0, 0, 0.0))[2],
+                cost_cny=round(day_data.get(d, (0, 0, 0, 0.0))[3], 4),
+            )
+            for d in day_list
+        ],
+    )

@@ -19,7 +19,7 @@ from backend.core.logger import get_logger
 logger = get_logger(__name__)
 
 # 当前代码支持的最高 schema 版本
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 async def get_schema_version(db: aiosqlite.Connection) -> int:
@@ -70,6 +70,8 @@ async def migrate(db: aiosqlite.Connection) -> None:
             await _migrate_v2(db)
         if current < 3:
             await _migrate_v3(db)
+        if current < 4:
+            await _migrate_v4(db)
 
         # 写版本号（DELETE 旧值保证单行；触发器同步 FTS 也兼容）
         await db.execute("DELETE FROM schema_version")
@@ -77,7 +79,7 @@ async def migrate(db: aiosqlite.Connection) -> None:
             "INSERT INTO schema_version (version, description) VALUES (?, ?)",
             (
                 SCHEMA_VERSION,
-                "v3: 用户 token_version + refresh_tokens 吊销表（token 可立即失效/登出）",
+                "v4: llm_usage 用量/成本记账表（G3.1 token 成本核算）",
             ),
         )
         await db.commit()
@@ -316,3 +318,32 @@ async def _migrate_v3(db: aiosqlite.Connection) -> None:
     await db.execute("CREATE INDEX IF NOT EXISTS idx_refresh_user ON refresh_tokens(user_id)")
 
     logger.info("migrate v3 ok (token_version + refresh_tokens)")
+
+
+# ---------------------------------------------------------------------------
+# v4: LLM 用量 / 成本记账（G3.1）
+# ---------------------------------------------------------------------------
+
+
+async def _migrate_v4(db: aiosqlite.Connection) -> None:
+    # llm_usage：每轮 LLM 调用一行，只插入不更新（append-only 便于审计与聚合）
+    await db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS llm_usage (
+            usage_id      TEXT    PRIMARY KEY,
+            user_id       TEXT    NOT NULL DEFAULT 'local_user',
+            agent_type    TEXT    NOT NULL DEFAULT 'knowledge_qa',
+            model         TEXT    NOT NULL,
+            input_tokens  INTEGER NOT NULL DEFAULT 0,
+            output_tokens INTEGER NOT NULL DEFAULT 0,
+            cost_cny      REAL    NOT NULL DEFAULT 0,
+            created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+        )
+        """
+    )
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_llm_usage_user ON llm_usage(user_id, created_at)"
+    )
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_created ON llm_usage(created_at)")
+
+    logger.info("migrate v4 ok (llm_usage)")

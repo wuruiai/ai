@@ -246,18 +246,24 @@ async def chat_stream(
         # 6. status: generating → 调 orchestrator（带多轮记忆历史，不含当前轮）
         yield create_status_event("generating").format()
 
-        # 真流式：TokenStreamHandler 把 LLM 逐 token 推入队列，下方循环并发 drain
+        # 真流式：TokenStreamHandler 把 LLM 逐 token 推入队列，下方循环并发 drain；
+        # UsageCollector 同链收集 token 用量，请求结束落库（G3.1 成本记账）
         from backend.core.token_stream import TokenStreamHandler
+        from backend.core.usage import UsageCollector
 
         stream_q: asyncio.Queue = asyncio.Queue()
         stream_handler = TokenStreamHandler(stream_q)
+        usage_collector = UsageCollector()
 
         agent_req = AgentRequest(
             user_id=user.user_id,
             session_id=thread_id,
             agent_type=AgentType.KNOWLEDGE_QA,
             user_message=query,
-            context={"history": history, "llm_callbacks": [stream_handler]},
+            context={
+                "history": history,
+                "llm_callbacks": [stream_handler, usage_collector],
+            },
         )
 
         # orchestrator 在独立 task 中运行：
@@ -291,6 +297,8 @@ async def chat_stream(
             return
         # 完成一次 orchestrator 调用即计入当日额度
         budget_manager.record_call(settings.LLM_MODEL)
+        # G3.1: token 用量落库（flush 内部已兜底，失败不影响回复）
+        await usage_collector.flush(user.user_id, agent_type="knowledge_qa")
 
         if not response.success:
             yield create_error_event(response.error_msg or "AGENT_ERROR", "agent failed").format()

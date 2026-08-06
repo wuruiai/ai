@@ -85,6 +85,9 @@ class Settings(BaseSettings):
     MAX_AGENT_STEPS: int = 12
     MAX_MULTI_QUERIES: int = 3
     DAILY_CALL_LIMIT: int = 1000
+    # LLM 成本核算（G3.1）：单价 元 / 百万 token，用于用量记账换算成本
+    LLM_PRICE_INPUT_PER_M: float = 0.8
+    LLM_PRICE_OUTPUT_PER_M: float = 2.0
     # 每用户每分钟请求上限（chat/upload 等重端点）
     RATE_LIMIT_PER_MINUTE: int = 30
 

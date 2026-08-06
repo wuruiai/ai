@@ -190,13 +190,17 @@
 
 ## Phase 3 — 成本与检索质量
 
-> **实施状态(2026-08-06)**:G3.3 ✅ / G3.4 ✅ / G3.1 ⏳ / G3.2 ⏳（按小改动先收口顺序执行）
+> **实施状态(2026-08-06)**:G3.3 ✅ / G3.4 ✅ / G3.1 ✅ / G3.2 ⏳（按小改动先收口顺序执行）
 >
 > - G3.3: 置信度改"顶分 + 领先 margin"相对信号（min-max 归一化下绝对阈值不可比，
 >   旧 HIGH=0.7 单一路径 fused 分最高仅 0.7 不可达）；`get_confidence_router` 改真单例；补三档单测。
 > - G3.4: `docs/eval_set.jsonl`（8 条水利场景评测样本）+ `scripts/evaluate_rag.py`（纯检索评测：
 >   recall@k / hit_rate@k / MRR@k → Markdown 报告，标题→真实 document_id 解析，缺文档按未命中计并 WARN）；
 >   `tests/unit/test_eval_script.py` 覆盖指标计算/标题解析/报告渲染/评测集合法性。
+> - G3.1: 迁移 v4 `llm_usage` 表 + `backend/core/usage.py` `UsageCollector`（on_llm_end 捕获
+>   token usage，与 TokenStreamHandler 同链，请求结束 flush 落库）；价格配置
+>   `LLM_PRICE_INPUT_PER_M/OUTPUT_PER_M`（元/百万 token）；`GET /admin/usage` 聚合累计 + 近 N 天趋势；
+>   chat.py 流结束记账；`tests/unit/test_usage.py` 覆盖提取/落库/成本/管理端。
 
 ### G3.1 LLM token/成本记账
 - **现状**:`TokenStreamHandler` 只实现 `on_llm_new_token`,丢弃 `usage_metadata`;`BudgetManager` 按"每次 orchestrator 完成"数 1 次调用(4 节点图算 1 次),内存态不持久。
