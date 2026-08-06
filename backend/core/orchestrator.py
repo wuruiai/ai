@@ -10,6 +10,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
 
+from backend.core.errors import ERROR_CODE_ORCHESTRATOR, GENERIC_ERROR_MESSAGE
 from backend.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -135,8 +136,9 @@ class Orchestrator:
             return AgentResponse(
                 success=False,
                 agent_type=request.agent_type,
-                content="系统处理请求时遇到问题，请稍后再试。",
-                error_msg=str(e),
+                content=GENERIC_ERROR_MESSAGE,
+                # G10.6 脱敏：真实异常只在服务端日志，客户端只见稳定错误码
+                error_msg=ERROR_CODE_ORCHESTRATOR,
             )
 
     async def _run_single_agent(self, request: AgentRequest) -> AgentResponse:

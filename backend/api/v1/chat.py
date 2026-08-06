@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from backend.api.v1.auth import CurrentUser, get_current_user
 from backend.config import settings
 from backend.core.budget import budget_manager
+from backend.core.errors import ERROR_CODE_ORCHESTRATOR, GENERIC_ERROR_MESSAGE
 from backend.core.logger import get_logger
 from backend.core.orchestrator import AgentRequest, AgentType, get_orchestrator
 from backend.core.rate_limit import check_rate_limit
@@ -285,11 +286,12 @@ async def _chat_stream(query: str, thread_id: str, user: CurrentUser) -> AsyncIt
                         yield create_token_event(payload).format()
                 response = task.result()
                 break
-    except Exception as e:
+    except Exception:
         if not task.done():
             task.cancel()
         logger.exception("orchestrator crashed")
-        yield create_error_event("ORCHESTRATOR_ERROR", str(e)).format()
+        # G10.6 脱敏：异常原文只进服务端日志，客户端只见稳定 code + 通用文案
+        yield create_error_event(ERROR_CODE_ORCHESTRATOR, GENERIC_ERROR_MESSAGE).format()
         return
     finally:
         # G9.3：客户端断开（GeneratorExit，BaseException 不被 except 捕获）或任何

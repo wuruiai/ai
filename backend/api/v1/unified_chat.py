@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from backend.api.v1.auth import CurrentUser, get_current_user
 from backend.config import settings
 from backend.core.budget import budget_manager
+from backend.core.errors import ERROR_CODE_ORCHESTRATOR, GENERIC_ERROR_MESSAGE
 from backend.core.logger import get_logger
 from backend.core.orchestrator import (
     AgentRequest,
@@ -180,9 +181,10 @@ async def unified_chat_stream(
         task = asyncio.create_task(orchestrator.handle(agent_request))
         try:
             response = await task
-        except Exception as e:
+        except Exception:
             logger.exception("orchestrator crashed")
-            yield create_error_event("ORCHESTRATOR_ERROR", str(e)).format()
+            # G10.6 脱敏：异常原文只进服务端日志，客户端只见稳定 code + 通用文案
+            yield create_error_event(ERROR_CODE_ORCHESTRATOR, GENERIC_ERROR_MESSAGE).format()
             return
         finally:
             # 任何退出路径（含客户端断开 GeneratorExit）统一回收后台任务，杜绝孤儿
@@ -257,13 +259,14 @@ async def unified_chat(
     )
     try:
         response = await orchestrator.handle(agent_request)
-    except Exception as e:
+    except Exception:
         logger.exception("orchestrator crashed")
         response = AgentResponse(
             success=False,
             agent_type=request.agent_type,
-            content="系统处理请求时遇到问题，请稍后再试。",
-            error_msg=str(e),
+            content=GENERIC_ERROR_MESSAGE,
+            # G10.6 脱敏：真实异常只在服务端日志，客户端只见稳定错误码
+            error_msg=ERROR_CODE_ORCHESTRATOR,
         )
     finally:
         # G9.1：token 用量落库（flush 内部兜底，失败/异常不影响回复）

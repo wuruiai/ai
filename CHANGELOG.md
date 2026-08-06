@@ -38,6 +38,10 @@
 
 ### Security
 
+- **异常信息脱敏（G10.6）**：orchestrator 崩溃/Agent 链路未预期异常不再把 `str(e)`（路径、
+  连接串、供应商错误原文等内部细节）透传给客户端——SSE `error` 事件与非流式响应统一收敛为
+  稳定错误码 `ORCHESTRATOR_ERROR` + 通用文案，真实异常由服务端 `logger.exception` 记录。
+  2 个回归测试（流式/非流式均不含异常原文）。
 - **认证安全收口（G10.5）**：① 注册按 IP 滑动窗口限流（`REGISTER_MAX_PER_WINDOW`，防批量
   注册），配合 `ALLOW_REGISTRATION` 总开关（生产可关闭开放注册）；② admin bootstrap 显式化——
   配置 `ADMIN_BOOTSTRAP_USERNAME` 后仅该用户名的首个注册者获得 admin，杜绝开放注册下攻击者

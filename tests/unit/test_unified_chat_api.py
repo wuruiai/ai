@@ -3,6 +3,7 @@
 from fastapi.testclient import TestClient
 
 from backend.api.v1 import unified_chat as uc
+from backend.core.errors import ERROR_CODE_ORCHESTRATOR, GENERIC_ERROR_MESSAGE
 from backend.core.orchestrator import AgentResponse, AgentType
 from backend.main import app
 
@@ -74,3 +75,53 @@ def test_unified_chat_requires_auth():
     with TestClient(app) as c:
         r = c.post("/api/v1/unified-chat/", json={"message": "x"})
         assert r.status_code == 401
+
+
+class _CrashOrch:
+    """handle 抛未预期异常（内部细节不得外泄）。"""
+
+    async def handle(self, agent_req):
+        raise RuntimeError("SECRET_INTERNAL_DETAILS: token=abc123 path=/app/data")
+
+
+def test_unified_chat_crash_redacts_non_stream(monkeypatch):
+    """G10.6：非流式 orchestrator 崩溃时，响应不含异常原文（脱敏为稳定码）。"""
+    monkeypatch.setattr(uc, "get_orchestrator", lambda: _CrashOrch())
+    with TestClient(app) as c:
+        r = c.post(
+            "/api/v1/auth/register", json={"username": "redact_user", "password": "pass123456"}
+        )
+        h = {"Authorization": f"Bearer {r.json()['token']}"}
+        r = c.post(
+            "/api/v1/unified-chat/",
+            json={"message": "水利工程是什么", "session_id": "s_redact"},
+            headers=h,
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["success"] is False
+        assert "SECRET_INTERNAL_DETAILS" not in body["error_msg"]
+        assert body["error_msg"] == ERROR_CODE_ORCHESTRATOR
+        assert "SECRET_INTERNAL_DETAILS" not in r.text
+        assert body["content"] == GENERIC_ERROR_MESSAGE
+
+
+def test_unified_chat_stream_crash_redacts(monkeypatch):
+    """G10.6：流式 orchestrator 崩溃时，SSE 流不含异常原文（稳定 code + 通用文案）。"""
+    monkeypatch.setattr(uc, "get_orchestrator", lambda: _CrashOrch())
+    with TestClient(app) as c:
+        r = c.post(
+            "/api/v1/auth/register", json={"username": "redact_s_user", "password": "pass123456"}
+        )
+        h = {"Authorization": f"Bearer {r.json()['token']}"}
+        r = c.post(
+            "/api/v1/unified-chat/stream",
+            json={"message": "水利工程是什么", "session_id": "s_redact_s"},
+            headers=h,
+        )
+        assert r.status_code == 200
+        text = r.text
+        assert "event: error" in text
+        assert "SECRET_INTERNAL_DETAILS" not in text
+        assert ERROR_CODE_ORCHESTRATOR in text
+        assert GENERIC_ERROR_MESSAGE in text
