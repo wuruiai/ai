@@ -106,11 +106,34 @@ start_dev.bat
 
 ### Docker 部署（生产形态）
 
+**开发形态**（本地构建，`docker-compose.yml`）：
+
 ```bash
 # 首次构建较慢（pip/npm 走国内镜像，见 Dockerfile/.npmrc）
 docker compose up -d --build
 # 前端 http://localhost:80 ，后端 http://localhost:8001
 ```
+
+**生产形态**（预构建镜像，`docker-compose.prod.yml`）：
+
+```bash
+# 1. 构建并推送镜像（CI 或本地；VERSION 指定镜像 tag，默认 latest）
+docker build -t ghcr.io/water-rag/water-rag-backend:${VERSION:-latest} .
+docker build -t ghcr.io/water-rag/water-rag-frontend:${VERSION:-latest} ./frontend
+docker push ghcr.io/water-rag/water-rag-backend:${VERSION:-latest}
+docker push ghcr.io/water-rag/water-rag-frontend:${VERSION:-latest}
+
+# 2. 部署机拉取并启动
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
+
+# 3. 回滚：换 VERSION 再 up 即可
+```
+
+生产清单与开发文件相互独立（不合并覆盖）：强制 `APP_ENV=production`（配合后端
+`ensure_secrets()` 缺密钥 fail-fast）、`restart: always`、数据用命名卷持久化、
+健康检查走 `/health/ready` 就绪探针（SQLite + Chroma 均可达才 healthy）。
+密钥经宿主环境变量 / `.env.production` 注入（该文件已被 `.gitignore` 排除，不入库）。
 
 > Docker 排障记录：若 `docker compose up` 卡住，多为 frontend 镜像 `npm ci`
 > 走官方源所致，本项目已内置 `frontend/.npmrc`（npmmirror）规避。详见 `docs/enterprise-optimization-plan.md`。

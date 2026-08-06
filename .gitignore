@@ -1,7 +1,8 @@
 # 环境配置
+# 所有 .env* 均不入库（含生产 .env.production），仅保留 .env.example 模板
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 
 # Python
 __pycache__/

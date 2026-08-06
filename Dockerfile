@@ -19,6 +19,7 @@ ENV ANONYMIZED_TELEMETRY=False
 EXPOSE 8001
 CMD ["sh", "-c", "python -m scripts.init_db && python -m uvicorn backend.main:app --host 0.0.0.0 --port 8001 --log-level info"]
 
-# 健康检查：供 docker-compose depends_on + 外部探活使用
+# 健康检查（就绪探针）：SQLite + Chroma 均可达才 healthy，
+# 供 docker-compose depends_on + 编排系统摘流使用
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=3)"
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health/ready', timeout=3)"

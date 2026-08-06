@@ -1,0 +1,58 @@
+# 生产部署清单（独立文件，不与开发用 docker-compose.yml 覆盖合并）
+#
+# 用「预构建镜像」部署，不在部署机上本地构建（CI 负责构建并推送镜像）。
+# 设计要点：
+#   - APP_ENV=production：配合 backend.ensure_secrets() 的 fail-fast，
+#     缺失 TOKEN_SECRET / DASHSCOPE_API_KEY 时拒绝启动，防止带空密钥上线
+#   - 密钥通过宿主环境变量 / .env.production 注入，绝不写进镜像
+#   - REDIS_URL 留空用内存限流/预算；多实例部署时填 redis 连接串共享计数
+#   - 健康检查用 /health/ready（SQLite + Chroma 就绪探针）
+#   - 数据用命名卷持久化，重启/升级不丢数据
+#
+# 用法：
+#   1. 构建并推送镜像（CI 或本地，VERSION 指定 tag，默认 latest）：
+#      docker build -t ghcr.io/water-rag/water-rag-backend:${VERSION:-latest} .
+#      docker build -t ghcr.io/water-rag/water-rag-frontend:${VERSION:-latest} ./frontend
+#      docker push ghcr.io/water-rag/water-rag-backend:${VERSION:-latest}
+#      docker push ghcr.io/water-rag/water-rag-frontend:${VERSION:-latest}
+#   2. 部署机拉取并启动：
+#      docker compose -f docker-compose.prod.yml pull
+#      docker compose -f docker-compose.prod.yml up -d
+#   3. 回滚到旧版本：换 VERSION 再 up 即可。
+
+services:
+  backend:
+    image: ghcr.io/water-rag/water-rag-backend:${VERSION:-latest}
+    pull_policy: always
+    restart: always
+    # .env.production 可选（缺失不报错）；关键密钥也可直接用宿主环境变量注入
+    env_file:
+      - path: .env.production
+        required: false
+    environment:
+      - APP_ENV=production
+      - APP_HOST=0.0.0.0
+      - FRONTEND_ORIGIN=http://localhost,http://127.0.0.1
+      - REDIS_URL=${REDIS_URL:-}
+      - BACKUP_ENABLED=true
+    volumes:
+      - water_data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health/ready', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+  frontend:
+    image: ghcr.io/water-rag/water-rag-frontend:${VERSION:-latest}
+    pull_policy: always
+    restart: always
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+
+volumes:
+  water_data:
