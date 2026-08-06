@@ -205,3 +205,98 @@ def test_login_brute_force_lockout():
         _register(c, "nina")
         r = c.post("/api/v1/auth/login", json={"username": "nina", "password": "pass123456"})
         assert r.status_code == 429
+
+
+def test_register_rate_limited_by_ip():
+    """G10.5 M3：注册按 IP 滑动窗口限流——窗口内第 N+1 次注册返回 429。
+
+    用 X-Forwarded-For 模拟独立来源 IP，与其余测试（testclient 默认 IP）隔离计数。
+    """
+    from backend.config import settings
+
+    ip = "203.0.113.77"
+    headers = {"X-Forwarded-For": ip}
+    with TestClient(app) as c:
+        for i in range(settings.REGISTER_MAX_PER_WINDOW):
+            r = c.post(
+                "/api/v1/auth/register",
+                json={"username": f"spam_{i}", "password": "pass123456"},
+                headers=headers,
+            )
+            assert r.status_code == 200, r.text
+
+        # 超限：第 N+1 次注册被拒（同一 IP），且带 Retry-After
+        r = c.post(
+            "/api/v1/auth/register",
+            json={"username": "spam_overflow", "password": "pass123456"},
+            headers=headers,
+        )
+        assert r.status_code == 429
+        assert int(r.headers["Retry-After"]) >= 1
+
+        # 不同 IP 不受影响（限流按 IP 隔离）
+        r = c.post(
+            "/api/v1/auth/register",
+            json={"username": "other_ip_ok", "password": "pass123456"},
+            headers={"X-Forwarded-For": "203.0.113.99"},
+        )
+        assert r.status_code == 200
+
+
+def test_register_disabled_when_allowed_flag_off(monkeypatch):
+    """G10.5 M4：ALLOW_REGISTRATION=false 时注册返回 403（生产可关开放注册）。"""
+    from backend.config import settings
+
+    monkeypatch.setattr(settings, "ALLOW_REGISTRATION", False)
+    with TestClient(app) as c:
+        r = c.post("/api/v1/auth/register", json={"username": "nobody", "password": "pass123456"})
+        assert r.status_code == 403
+
+
+def test_admin_bootstrap_username_explicit(monkeypatch):
+    """G10.5 M4：配置 ADMIN_BOOTSTRAP_USERNAME 后，仅该用户名的首个注册者获得 admin。"""
+    from backend.config import settings
+
+    monkeypatch.setattr(settings, "ADMIN_BOOTSTRAP_USERNAME", "root")
+    with TestClient(app) as c:
+        # 攻击者先注册别的名字 → 拿不到 admin
+        r = c.post("/api/v1/auth/register", json={"username": "attacker", "password": "pass123456"})
+        assert r.status_code == 200
+        assert r.json()["user"]["role"] == "user"
+
+        # 配置名注册 → admin
+        r = c.post("/api/v1/auth/register", json={"username": "root", "password": "pass123456"})
+        assert r.status_code == 200
+        assert r.json()["user"]["role"] == "admin"
+
+
+def test_client_ip_prefers_x_forwarded_for():
+    """G10.5 M6：反代场景下客户端 IP 取 X-Forwarded-For 最左侧（真实客户端），
+    而非 nginx 地址；直连（无该头）回退 request.client.host。"""
+    from starlette.requests import Request
+
+    from backend.api.v1 import auth as auth_api
+
+    def _make(xff: str | None) -> Request:
+        headers = []
+        if xff is not None:
+            headers.append((b"x-forwarded-for", xff.encode()))
+        scope = {
+            "type": "http",
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/api/v1/auth/register",
+            "query_string": b"",
+            "root_path": "",
+            "headers": headers,
+            "client": ("192.168.1.99", 54321),
+            "server": ("127.0.0.1", 8001),
+        }
+        return Request(scope)
+
+    assert auth_api._client_ip(_make("203.0.113.50")) == "203.0.113.50"
+    # 多级反代：取最左侧（真实客户端），右侧为各级代理
+    assert auth_api._client_ip(_make("203.0.113.50, 10.0.0.2, 10.0.0.1")) == "203.0.113.50"
+    # 直连（无反代头）→ 回退 socket 地址
+    assert auth_api._client_ip(_make(None)) == "192.168.1.99"

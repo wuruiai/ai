@@ -38,6 +38,13 @@
 
 ### Security
 
+- **认证安全收口（G10.5）**：① 注册按 IP 滑动窗口限流（`REGISTER_MAX_PER_WINDOW`，防批量
+  注册），配合 `ALLOW_REGISTRATION` 总开关（生产可关闭开放注册）；② admin bootstrap 显式化——
+  配置 `ADMIN_BOOTSTRAP_USERNAME` 后仅该用户名的首个注册者获得 admin，杜绝开放注册下攻击者
+  "先注册先夺权"；③ `ensure_secrets()` 从"仅 production 强制"收紧为"任何非 local 环境
+  （staging/test 等）缺失 `TOKEN_SECRET` / `DASHSCOPE_API_KEY` 一律拒绝启动"；④ 客户端 IP
+  解析支持 `X-Forwarded-For`（取最左侧真实客户端），反代后登录/注册限流与审计的 IP 维度不再
+  退化为 nginx 地址。6 个回归测试。
 - **跨用户数据隔离（G10.1）**：`document_analysis` 检索强制带 `user_id`（`document_id`
   非全局唯一键，此前只按它过滤可跨用户读取他人文档）；orchestrator 禁止客户端
   `context` 覆盖身份字段（`user_id` / `student_id` / `session_id`）；重复上传路径校验

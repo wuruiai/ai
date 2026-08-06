@@ -16,8 +16,8 @@
 ## 密钥与配置
 
 - `.env` 全程 gitignored（`.gitignore` 含 `.env.*`，仅保留 `.env.example` 模板），任何 secrets 不入库。
-- **生产 fail-fast**：`APP_ENV=production` 时 `ensure_secrets()` 强制校验
-  `TOKEN_SECRET` 与 `DASHSCOPE_API_KEY`，缺失直接拒绝启动。
+- **非本地 fail-fast**：`APP_ENV != local`（production / staging 等）时 `ensure_secrets()`
+  强制校验 `TOKEN_SECRET` 与 `DASHSCOPE_API_KEY`，缺失直接拒绝启动。
 - 本地开发留空 `TOKEN_SECRET` 时使用进程级随机值（重启后旧 token 失效，仅限开发便利）。
 
 ## 数据隔离

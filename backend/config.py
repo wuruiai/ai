@@ -33,13 +33,21 @@ class Settings(BaseSettings):
     LOGIN_LOCKOUT_S: int = 900
     LOGIN_WINDOW_S: int = 900
     LOG_LEVEL: str = "INFO"
+    # 注册安全（G10.5）：开放注册总开关（生产可关）+ 注册按 IP 滑动窗口限流（防批量注册）
+    ALLOW_REGISTRATION: bool = True
+    REGISTER_MAX_PER_WINDOW: int = 10
+    REGISTER_WINDOW_S: int = 3600
+    # admin bootstrap 显式化（G10.5）：非空时仅该用户名的首个注册者获得 admin，
+    # 其余注册者一律普通用户——杜绝开放注册下"先到者夺权"
+    ADMIN_BOOTSTRAP_USERNAME: str = ""
 
     def ensure_secrets(self) -> None:
-        """生产环境启动强校验：缺失关键密钥直接拒绝启动（fail-fast）。
+        """非本地环境启动强校验：缺失关键密钥直接拒绝启动（fail-fast）。
 
-        本地/开发环境不强制，便于开箱即用（TOKEN_SECRET 空时进程级随机）。
+        仅 `local`（默认开发环境）豁免，便于开箱即用（TOKEN_SECRET 空时进程级随机）；
+        production / staging 等任何非 local 环境一律强制，防止带空密钥上线。
         """
-        if self.APP_ENV != "production":
+        if self.APP_ENV == "local":
             return
         secrets = (
             ("TOKEN_SECRET", self.TOKEN_SECRET),

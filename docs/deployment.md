@@ -75,7 +75,7 @@ docker run -d --name water-backup-cron -v water-data:/app/data <镜像> python -
 
 | 变量 | 默认 | 说明 |
 |------|------|------|
-| `APP_ENV` | `local` | `production` 触发密钥 fail-fast 校验 |
+| `APP_ENV` | `local` | 非 `local`（production/staging 等）触发密钥 fail-fast 校验 |
 | `APP_PORT` | `8001` | 后端监听端口 |
 | `TOKEN_SECRET` | 空 | JWT 签名密钥；**生产必填**（缺失拒绝启动） |
 | `DASHSCOPE_API_KEY` | 空 | 云端模型密钥；**生产必填** |

@@ -7,6 +7,7 @@
     - refresh token 落库可吊销 → 支持登出与轮换（G1.2）
     - token_version：改密/权限变更后旧 token 立即失效（G1.4）
     - 登录防爆破：ip|username 双维度失败锁定（G1.1）
+    - 注册安全：按 IP 滑动窗口限流 + 开放注册总开关 + admin bootstrap 显式化（G10.5）
     - 生产环境启动强校验 TOKEN_SECRET / DASHSCOPE_API_KEY（G1.3，见 config.ensure_secrets）
 
 """
@@ -25,6 +26,7 @@ from pydantic import BaseModel, Field
 
 from backend.config import settings
 from backend.core.audit import write_audit
+from backend.core.backends import get_rate_limit_backend
 from backend.core.logger import get_logger
 from backend.core.security import validate_origin
 from backend.db.connection import close_db, get_connection
@@ -37,6 +39,13 @@ router = APIRouter()
 _process_secret = settings.TOKEN_SECRET or uuid.uuid4().hex
 
 _PBKDF2_ITERATIONS = 100_000
+
+# 注册按 IP 滑动窗口限流（G10.5）：内存/Redis 可插拔，计数维度为 `register:{ip}`。
+# 不能用登录防爆破（LoginThrottle 是失败锁定语义）：注册滥发是"每次都成功"，
+# 需要的是窗口内次数配额而非失败累计。
+register_throttle = get_rate_limit_backend(
+    settings.REGISTER_MAX_PER_WINDOW, settings.REGISTER_WINDOW_S
+)
 
 
 # ---------------------------------------------------------------------------
@@ -286,7 +295,16 @@ def _user_public(user_id: str, username: str, role: str, display_name: str) -> d
 
 
 def _client_ip(request: Request) -> str | None:
+    """客户端 IP：优先取 `X-Forwarded-For` 最左侧（反代 nginx 追加时最左侧是真实客户端），
+    回退 `request.client.host`（直连场景）。登录/注册限流与审计都按此 IP 维度计数——
+    若不解析反代头，反代后所有请求的 IP 都是 nginx 的，IP 维度限流形同虚设。
+    """
     try:
+        xff = request.headers.get("x-forwarded-for")
+        if xff:
+            first = xff.split(",")[0].strip()
+            if first:
+                return first
         return request.client.host if request.client else None
     except Exception:  # noqa: BLE001
         return None
@@ -294,8 +312,22 @@ def _client_ip(request: Request) -> str | None:
 
 @router.post("/register")
 async def register(req: RegisterRequest, request: Request) -> dict:
-    """注册。首个注册用户自动成为管理员（bootstrap）。"""
+    """注册。首个注册用户自动成为管理员（bootstrap，可经 ADMIN_BOOTSTRAP_USERNAME 显式化）。"""
     validate_origin(request)
+
+    # 开放注册总开关（G10.5）：生产可 ALLOW_REGISTRATION=false 关闭注册
+    if not settings.ALLOW_REGISTRATION:
+        raise HTTPException(status_code=403, detail="注册已关闭")
+
+    # 注册按 IP 滑动窗口限流（G10.5）：窗口内最多 REGISTER_MAX_PER_WINDOW 次，超限 429
+    ip = _client_ip(request) or "unknown"
+    if not register_throttle.allow(f"register:{ip}"):
+        raise HTTPException(
+            status_code=429,
+            detail="注册过于频繁，请稍后再试",
+            headers={"Retry-After": str(settings.REGISTER_WINDOW_S)},
+        )
+
     db = await get_connection()
     try:
         # 排除 v1 遗留的 local 种子用户：首个"注册"用户才成为管理员
@@ -304,6 +336,11 @@ async def register(req: RegisterRequest, request: Request) -> dict:
         ) as cur:
             admin_count = (await cur.fetchone())[0]
         role = "admin" if admin_count == 0 else "user"
+        # admin bootstrap 显式化（G10.5）：配置了 ADMIN_BOOTSTRAP_USERNAME 后，
+        # 仅该用户名的注册者能抢占首个 admin 席位；其余一律普通用户，
+        # 杜绝开放注册下攻击者"先注册先夺权"。
+        if settings.ADMIN_BOOTSTRAP_USERNAME and req.username != settings.ADMIN_BOOTSTRAP_USERNAME:
+            role = "user"
         user_id = str(uuid.uuid4())
         try:
             await db.execute(
@@ -333,7 +370,7 @@ async def register(req: RegisterRequest, request: Request) -> dict:
         target_type="user",
         target_id=user_id,
         detail=f"role={role}",
-        ip=_client_ip(request),
+        ip=ip,
     )
     return _token_response(
         user_id, req.username, role, req.display_name or req.username, access, refresh
