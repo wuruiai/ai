@@ -17,10 +17,37 @@ class Settings(BaseSettings):
     APP_ENV: str = "local"
     APP_HOST: str = "127.0.0.1"
     APP_PORT: int = 8001
-    # token 签名 secret：留空则进程级随机（重启后旧 token 失效）；
-    # 生产建议在 .env 设固定值，重启后登录态保持
+    # token 签名 secret：生产必须设置（ensure_secrets 强制），
+    # 留空且非生产时进程级随机（重启后旧 token 失效，仅限开发）
     TOKEN_SECRET: str = ""
+    # 短时效 access token 有效期（秒）：默认 30 分钟
+    ACCESS_TOKEN_TTL_S: int = 1800
+    # 长时效 refresh token 有效期（秒）：默认 7 天
+    REFRESH_TOKEN_TTL_S: int = 604800
+    # 登录防爆破：窗口内最大失败次数，超过后锁定该 key（ip/用户名）lockout 秒
+    LOGIN_MAX_FAILURES: int = 5
+    LOGIN_LOCKOUT_S: int = 900
+    LOGIN_WINDOW_S: int = 900
     LOG_LEVEL: str = "INFO"
+
+    def ensure_secrets(self) -> None:
+        """生产环境启动强校验：缺失关键密钥直接拒绝启动（fail-fast）。
+
+        本地/开发环境不强制，便于开箱即用（TOKEN_SECRET 空时进程级随机）。
+        """
+        if self.APP_ENV != "production":
+            return
+        secrets = (
+            ("TOKEN_SECRET", self.TOKEN_SECRET),
+            ("DASHSCOPE_API_KEY", self.DASHSCOPE_API_KEY),
+        )
+        missing = [name for name, val in secrets if not val]
+        if missing:
+            raise RuntimeError(
+                "production startup blocked: missing required secrets: "
+                f"{', '.join(missing)}. 请在 .env 中设置后重启。"
+            )
+
     DATA_ROOT: str = "./data"
     # 允许的前端 Origin，逗号分隔。默认同时允许 localhost 与 127.0.0.1：
     # 开发机 Vite(host:0.0.0.0) 两个地址都能访问，两个 Origin 都会被浏览器带上。

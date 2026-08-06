@@ -19,7 +19,7 @@ from backend.core.logger import get_logger
 logger = get_logger(__name__)
 
 # 当前代码支持的最高 schema 版本
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 async def get_schema_version(db: aiosqlite.Connection) -> int:
@@ -69,7 +69,8 @@ async def migrate(db: aiosqlite.Connection) -> None:
             await _migrate_v1(db)
         if current < 2:
             await _migrate_v2(db)
-        # 未来：if current < 3: await _migrate_v3(db) ...
+        if current < 3:
+            await _migrate_v3(db)
 
         # 写版本号（DELETE 旧值保证单行；触发器同步 FTS 也兼容）
         await db.execute("DELETE FROM schema_version")
@@ -77,7 +78,7 @@ async def migrate(db: aiosqlite.Connection) -> None:
             "INSERT INTO schema_version (version, description) VALUES (?, ?)",
             (
                 SCHEMA_VERSION,
-                "初始结构：users/documents/chunks/messages/feedback/ingestion_tasks + FTS5",
+                "v3: 用户 token_version + refresh_tokens 吊销表（token 可立即失效/登出）",
             ),
         )
         await db.commit()
@@ -290,3 +291,30 @@ async def _migrate_v2(db: aiosqlite.Connection) -> None:
     await db.execute("CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action, created_at)")
 
     print("migrate v2 ok (RBAC + 数据归属 + 审计 + 知识库结构化)")
+
+
+# ---------------------------------------------------------------------------
+# v3: Token 安全 —— token_version 立即失效 + refresh token 吊销
+# ---------------------------------------------------------------------------
+
+
+async def _migrate_v3(db: aiosqlite.Connection) -> None:
+    # users.token_version：密码修改/权限变更时 bump，签发过的旧 token 立即失效
+    await db.execute("ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0")
+
+    # refresh_tokens：长期 refresh token 落库（可吊销），支持登出/轮换
+    await db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS refresh_tokens (
+            token_id   TEXT PRIMARY KEY,
+            user_id    TEXT    NOT NULL,
+            expires_at INTEGER NOT NULL,
+            revoked_at INTEGER,
+            created_at TEXT    NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+        """
+    )
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_refresh_user ON refresh_tokens(user_id)")
+
+    print("migrate v3 ok (token_version + refresh_tokens)")

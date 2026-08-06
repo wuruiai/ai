@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import csv
 import io
+import time
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -163,6 +164,15 @@ async def admin_update_user(
             params.append(user_id)
             # sets 全部来自固定模板字面量（role=?/is_active=?），值参数绑定 → 无注入面
             await db.execute(f"UPDATE users SET {', '.join(sets)} WHERE id=?", params)  # noqa: S608
+            # 权限/状态变更后立即吊销该用户全部 token，让新角色/停用即刻生效（G1.4）
+            await db.execute(
+                "UPDATE users SET token_version = token_version + 1 WHERE id=?",
+                (user_id,),
+            )
+            await db.execute(
+                "UPDATE refresh_tokens SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL",
+                (int(time.time()), user_id),
+            )
             await db.commit()
             await write_audit(
                 "admin.user_update",

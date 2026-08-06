@@ -83,6 +83,14 @@
 
 ## Phase 1 — 安全加固(Auth 体系)
 
+> **实施状态(2026-08-06)**:G1.1 ✅ / G1.2 ✅ / G1.3 ✅ / G1.4 ✅ / G1.5 ⏸️(后置,见下)
+>
+> 实现要点(与下面"改法"略有出入,以实际代码为准):
+> - G1.1: `LoginThrottle` 落地在 `backend/core/rate_limit.py`(滑动窗口 + 锁定期),`login()` 内按 `ip:<host>` / `user:<username>` 双键 `check()` + `record_failure()`;内存态(进程级),无 DB 表。
+> - G1.2: 标准 PyJWT HS256;`refresh_tokens` 表存 jti + 过期 + revoked_at;`/auth/refresh` 轮换(旧 refresh 即吊销 + 重放检测);`/auth/logout`(单条或 all);`/auth/me` 实时返回 DB 权威角色。前端 axios 拦截器 401 时自动 refresh 重放一次,store 内单飞去重。
+> - G1.3: `Settings.ensure_secrets()`(仅 `APP_ENV=production` 强制 TOKEN_SECRET / DASHSCOPE_API_KEY,缺失拒绝启动);`main.py` lifespan 首行调用。
+> - G1.4: `users.token_version`;`get_current_user` async 校验 `ver == token_version`;改密/管理员改角色或停用均 bump + revoke refresh。
+
 ### G1.1 登录/注册防爆破
 - **现状**:`backend/api/v1/auth.py` 的 login/register 无限流(`check_rate_limit` 只挂在 chat/upload)。暴力破解敞口,开放注册。
 - **改法**:

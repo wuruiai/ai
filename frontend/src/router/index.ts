@@ -38,7 +38,7 @@ const router = createRouter({
 
 // 登录守卫：未登录跳转 /login；已登录访问 /login 跳首页
 router.beforeEach((to) => {
-  const token = localStorage.getItem('token')
+  const token = localStorage.getItem('access_token') || localStorage.getItem('token')
   if (to.path !== '/login' && !token) {
     return { path: '/login' }
   }

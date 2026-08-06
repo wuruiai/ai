@@ -29,6 +29,8 @@ _FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期"""
+    # 生产环境密钥强校验：缺失关键 secret 直接拒绝启动（G1.3 fail-fast）
+    settings.ensure_secrets()
     # 启动时：确保数据库迁移完成（幂等）、Chroma 集合可用
     print("Starting Water RAG + Agent...")
     try:

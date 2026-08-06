@@ -23,8 +23,9 @@ os.environ.setdefault("DAILY_CALL_LIMIT", "1000")
 
 @pytest.fixture(autouse=True)
 def _fresh_db():
-    """每个测试前清空临时 SQLite，保证测试顺序无关（每个测试内“首个注册=admin”）。"""
+    """每个测试前清空临时 SQLite + 内存状态，保证测试顺序无关（每个测试内“首个注册=admin”）。"""
     from backend.config import settings
+    from backend.core.rate_limit import login_throttle
 
     for p in (
         Path(settings.SQLITE_PATH),
@@ -32,4 +33,7 @@ def _fresh_db():
         Path(settings.SQLITE_PATH + "-shm"),
     ):
         p.unlink(missing_ok=True)
+    # 登录防爆破是进程级内存状态，逐测试清空，避免跨用例累计
+    login_throttle._failures.clear()
+    login_throttle._lockout_until.clear()
     yield

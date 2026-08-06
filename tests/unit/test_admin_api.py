@@ -46,15 +46,20 @@ def test_admin_user_management():
         assert user["user"]["role"] == "user"
         uid = user["user"]["user_id"]
 
-        # 禁用用户 → 再登录 403
+        # 普通用户访问管理端点 → 403（角色鉴权在认证层之后生效）
+        peon = _register(c, "peon")
+        r = c.get("/api/v1/admin/stats", headers={"Authorization": f"Bearer {peon['token']}"})
+        assert r.status_code == 403
+
+        # 禁用用户 → 再登录 403（is_active=0 拒绝签发新 token）
         r = c.patch(f"/api/v1/admin/users/{uid}", json={"is_active": 0}, headers=h)
         assert r.status_code == 200
         r = c.post("/api/v1/auth/login", json={"username": "normal_user", "password": "pass123456"})
         assert r.status_code == 403
 
-        # 普通用户访问管理端点 → 403
+        # 禁用后 token_version 已 bump：禁用前签发的旧 token 立即失效 → 401（G1.4）
         r = c.get("/api/v1/admin/stats", headers={"Authorization": f"Bearer {user['token']}"})
-        assert r.status_code == 403
+        assert r.status_code == 401
 
         # 管理员不能禁用自己
         self_id = admin["user"]["user_id"]

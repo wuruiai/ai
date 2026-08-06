@@ -27,6 +27,9 @@ chromadb==0.6.3
 pydantic==2.10.4
 pydantic-settings==2.7.1
 
+# 认证（标准 JWT）
+PyJWT==2.10.1
+
 # 数据库
 aiosqlite==0.21.0
 
