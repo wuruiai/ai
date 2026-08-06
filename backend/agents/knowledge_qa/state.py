@@ -46,7 +46,9 @@ class KnowledgeQAState(MessagesState):
     # 降级标记
     fallback_used: bool = False
 
-    # 真流式：由 chat.py 注入的 LLM token 回调（TokenStreamHandler 列表）
+    # 真流式：由 chat.py 注入的 LLM token 回调（TokenStreamHandler + UsageCollector）。
+    # 辅助 LLM（分类器/HyDE/多查询）经 usage_only_callbacks() 剔除 TokenStreamHandler，
+    # 只留用量链（S2 防中间产物泄漏到 SSE）；最终答案生成节点用完整链流式输出。
     llm_callbacks: Any = None
 
     # Web 搜索

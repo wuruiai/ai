@@ -13,6 +13,7 @@ from backend.core.confidence_router import ConfidenceLevel, get_confidence_route
 from backend.core.logger import get_logger
 from backend.core.model_factory import ModelFactory
 from backend.core.query_classifier import get_query_classifier
+from backend.core.token_stream import usage_only_callbacks
 from backend.rag.hyde import get_hyde_generator
 from backend.rag.multi_query import get_multi_query_rewriter
 from backend.rag.reranker import rerank
@@ -31,8 +32,12 @@ async def classify_query_node(state: KnowledgeQAState) -> dict[str, Any]:
     query = last_message.content if hasattr(last_message, "content") else str(last_message)
 
     # 使用查询分类器（G10.7 M1：带用量回调，辅助 LLM 的 token 也计入 llm_usage）
+    # S2 流式泄漏：辅助 LLM 只挂用量链——usage_only_callbacks() 剔除 TokenStreamHandler，
+    # 否则分类器 JSON 会逐 token 泄漏到用户可见的 SSE 流。
     classifier = get_query_classifier()
-    query_type, _ = await classifier.classify(query, callbacks=state.get("llm_callbacks"))
+    query_type, _ = await classifier.classify(
+        query, callbacks=usage_only_callbacks(state.get("llm_callbacks"))
+    )
 
     # 分类器返回 GENERAL / SPECIALIZED，需映射到 graph 路由能识别的类型：
     #   SPECIALIZED（专业问题）→ PRECISE（走 RAG 检索）
@@ -54,7 +59,10 @@ async def hyde_generate_node(state: KnowledgeQAState) -> dict[str, Any]:
     query = state.get("original_query", "")
 
     hyde_gen = get_hyde_generator()
-    hypothetical_doc = await hyde_gen.generate(query, callbacks=state.get("llm_callbacks"))
+    # S2 流式泄漏：辅助 LLM 只挂用量链（剔除 TokenStreamHandler），见 usage_only_callbacks
+    hypothetical_doc = await hyde_gen.generate(
+        query, callbacks=usage_only_callbacks(state.get("llm_callbacks"))
+    )
 
     return {
         "hypothetical_doc": hypothetical_doc,
@@ -68,7 +76,10 @@ async def multi_query_rewrite_node(state: KnowledgeQAState) -> dict[str, Any]:
     query = state.get("original_query", "")
 
     rewriter = get_multi_query_rewriter()
-    queries = await rewriter.rewrite(query, callbacks=state.get("llm_callbacks"))
+    # S2 流式泄漏：辅助 LLM 只挂用量链（剔除 TokenStreamHandler），见 usage_only_callbacks
+    queries = await rewriter.rewrite(
+        query, callbacks=usage_only_callbacks(state.get("llm_callbacks"))
+    )
 
     return {
         "queries": queries,

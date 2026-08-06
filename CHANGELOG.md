@@ -75,6 +75,12 @@
 
 ### Security
 
+- **辅助 LLM 不再泄漏中间产物到 SSE 流（G10.14）**：`chat/stream` 注入的
+  `[TokenStreamHandler, UsageCollector]` 回调链此前被分类器 / HyDE / 多查询改写等
+  辅助 LLM 全量透传——分类器 JSON（`{"type": ...}`）等中间产物逐 token 推入 SSE
+  队列，用户在最终答案前看到脏输出。新增 `usage_only_callbacks()` 在辅助节点剔除
+  `TokenStreamHandler`（只留用量链，G10.7 记账不回退），最终答案生成节点仍用完整
+  链流式输出；unified_chat 路径（仅用量链）行为不变。8 个回归测试。
 - **登录锁定按来源 IP 作用域（G10.13）**：登录失败锁定的 username 维度 key 从全局
   `user:{username}` 收紧为 `user:{ip}:{username}`——修复前任意来源 IP 凑满 5 次错误密码
   即可把该账户全局锁定 15 分钟（持续刷失败可无限续期，构成对任意账户的远程锁号 DoS）；
