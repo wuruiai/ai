@@ -9,6 +9,8 @@ from functools import lru_cache
 
 from pydantic_settings import BaseSettings
 
+from backend import __version__
+
 
 class Settings(BaseSettings):
     """应用配置"""
@@ -17,8 +19,9 @@ class Settings(BaseSettings):
     APP_ENV: str = "local"
     APP_HOST: str = "127.0.0.1"
     APP_PORT: int = 8001
-    # 应用版本（G7.2 收口）：health 探针 / OpenAPI 统一从这里读，避免硬编码漂移
-    APP_VERSION: str = "1.0.0"
+    # 应用版本（G8.2 单一来源）：health 探针 / OpenAPI 统一从这里读；
+    # 默认值来自 backend.__version__（pyproject.toml 同源派生），可用环境变量覆盖（灰度/品牌场景）
+    APP_VERSION: str = __version__
     # token 签名 secret：生产必须设置（ensure_secrets 强制），
     # 留空且非生产时进程级随机（重启后旧 token 失效，仅限开发）
     TOKEN_SECRET: str = ""
