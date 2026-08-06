@@ -1,17 +1,22 @@
 # 水利 RAG + Agent 锁定依赖
-# 生成时间: 2026-08-01
+# 生成时间: 2026-08-06（G9.5：8 版本升级 + starlette 安全锁 pin，OSV 复核 0 已知漏洞；
+# pytest* 迁入 requirements-dev.txt）
 # Python 版本: 3.11.x
 
 # Web 框架
-fastapi==0.117.1
+# fastapi>=0.135 才放开 starlette 上限；starlette 显式安全锁 pin：
+# 0.48 有 20 条已知 CVE（PYSEC-2026-*），1.4.1 起无已知漏洞，且须显示声明才不会被
+# 增量安装时静默保留旧版（pip 不会为不在锁中的传递依赖做升级）。
+fastapi==0.141.1
+starlette==1.4.1
 uvicorn[standard]==0.32.1
-python-multipart==0.0.18
+python-multipart==0.0.32
 
-# LangChain 生态
-langgraph==1.0.9
-langchain-core==1.2.16
-langchain-openai==1.1.10
-langchain-text-splitters==1.1.1
+# LangChain 生态（G9.5：整体升至无已知 CVE 版本）
+langgraph==1.2.10
+langchain-core==1.5.3
+langchain-openai==1.4.1
+langchain-text-splitters==1.1.2
 
 # OpenAI SDK
 openai==2.46.0
@@ -28,7 +33,7 @@ pydantic==2.10.4
 pydantic-settings==2.7.1
 
 # 认证（标准 JWT）
-PyJWT==2.10.1
+PyJWT==2.13.0
 
 # 可观测性（Prometheus /metrics）
 prometheus-client==0.26.0
@@ -38,11 +43,6 @@ aiosqlite==0.21.0
 
 # 工具库
 httpx==0.28.1
-python-dotenv==1.1.0
+python-dotenv==1.2.2
 tenacity==9.1.2
 tiktoken==0.9.0
-
-# 测试
-pytest==8.3.4
-pytest-asyncio==0.25.0
-pytest-cov==6.1.1
