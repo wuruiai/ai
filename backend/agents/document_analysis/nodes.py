@@ -67,9 +67,16 @@ async def load_document(state: dict[str, Any]) -> dict[str, Any]:
         return {**state, "document_loaded": False, "status": "failed"}
 
     # 检索该文档的 top chunks（query 为空则用文档 ID 前缀做兜底查询）
+    # 数据隔离（S1）：必须同时限定 user_id——document_id 非全局唯一键，
+    # 只按 document_id 过滤会让传他人 ID 的请求跨用户读到对方文档内容。
     try:
         search_query = query or document_id[:8]
-        results = await hybrid_retrieve(search_query, top_k=12, document_id=document_id)
+        results = await hybrid_retrieve(
+            search_query,
+            top_k=12,
+            document_id=document_id,
+            user_id=state.get("user_id"),
+        )
     except Exception as e:  # noqa: BLE001
         logger.warning("document_analysis load failed: %s", e)
         results = []

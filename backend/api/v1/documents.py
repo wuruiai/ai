@@ -270,7 +270,11 @@ async def upload_document(
             ) as cur2:
                 existing = await cur2.fetchone()
             if existing:
-                doc_id, doc_name, doc_size, doc_status, stored, _ = existing
+                doc_id, doc_name, doc_size, doc_status, stored, owner_user_id = existing
+                # 跨用户隔离（S1）：内容哈希幂等仅限同属主。他人已上传的同内容文件，
+                # 返回 409 且不泄露其 document_id / 元数据 / 状态（防跨用户文件枚举）。
+                if owner_user_id != user.user_id:
+                    raise HTTPException(status_code=409, detail="file already exists")
                 # 失败/中断的文档允许"重传重试"：重新触发摄取（成功文档保持幂等返回）。
                 # 此前失败/中间态的文档重复上传只会拿回旧状态，摄取永远不会重跑。
                 if doc_status != IngestionStatus.READY.value and stored:

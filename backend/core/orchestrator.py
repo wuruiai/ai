@@ -14,6 +14,11 @@ from backend.core.logger import get_logger
 
 logger = get_logger(__name__)
 
+# context 中禁止客户端覆盖的身份字段（始终取自已认证的 AgentRequest.user_id）。
+# 否则 `**request.context` 解包到 initial_state 时，攻击者可注入
+# context={"user_id": "<他人>"} 窃取他人数据（S1 跨用户隔离）。
+_IDENTITY_KEYS = frozenset({"user_id", "student_id", "session_id"})
+
 
 class ExecutionMode(StrEnum):
     """执行模式"""
@@ -147,7 +152,9 @@ class Orchestrator:
             "student_id": request.user_id,
             "user_id": request.user_id,
             "session_id": request.session_id,
-            **{k: v for k, v in request.context.items() if k != "history"},
+            # context 允许补充业务字段（document_id/pipeline_key 等），
+            # 但身份字段不可被客户端覆盖（见模块级 _IDENTITY_KEYS）
+            **{k: v for k, v in request.context.items() if k not in _IDENTITY_KEYS},
         }
 
         config = {

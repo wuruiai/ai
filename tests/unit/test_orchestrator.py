@@ -56,3 +56,32 @@ def test_pipeline_aggregates(monkeypatch):
     resp = asyncio.run(orch.handle(req))
     assert resp.success
     assert resp.content.count("图答案") >= 1  # 两段答案被拼接
+
+
+def test_context_cannot_override_identity(monkeypatch):
+    """S1：客户端 context 注入 user_id/session_id 不得覆盖已认证身份。"""
+    captured: dict = {}
+    fake = _FakeGraph()
+    original_ainvoke = fake.ainvoke
+
+    async def _capturing_ainvoke(state, config=None):
+        captured.update(state)
+        return await original_ainvoke(state, config)
+
+    monkeypatch.setattr(fake, "ainvoke", _capturing_ainvoke)
+    orch = Orchestrator()
+    monkeypatch.setattr(orch, "_get_agent_graph", lambda t: fake)
+
+    req = AgentRequest(
+        user_id="u1",
+        session_id="s1",
+        agent_type=AgentType.DOCUMENT_ANALYSIS,
+        user_message="分析",
+        context={"user_id": "attacker", "session_id": "evil", "document_id": "doc-123"},
+    )
+    asyncio.run(orch._run_single_agent(req))
+    # 身份字段始终取自已认证请求，document_id 等业务字段仍可透传
+    assert captured["user_id"] == "u1"
+    assert captured["student_id"] == "u1"
+    assert captured["session_id"] == "s1"
+    assert captured["document_id"] == "doc-123"

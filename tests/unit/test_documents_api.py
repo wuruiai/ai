@@ -101,3 +101,40 @@ def test_upload_csrf_origin_blocked(monkeypatch):
             headers={"Authorization": f"Bearer {tok}", "Origin": "https://evil.example.com"},
         )
         assert r.status_code == 403  # 恶意 Origin 被拒
+
+
+def test_cross_user_duplicate_upload_409(monkeypatch):
+    """S1：内容哈希幂等仅限同属主——他人已上传的同内容文件返回 409，不泄露元数据。"""
+    monkeypatch.setattr(doc_api, "_spawn_ingestion", _noop_ingestion)
+    with TestClient(app) as c:
+        tokA, _ = _register(c, "dup_a")
+        tokB, _ = _register(c, "dup_b")
+        hA = {"Authorization": f"Bearer {tokA}"}
+        hB = {"Authorization": f"Bearer {tokB}"}
+        payload = b"same shared content bytes"
+
+        rA = c.post(
+            "/api/v1/documents/",
+            files={"file": ("a.txt", payload, "text/plain")},
+            headers=hA,
+        )
+        assert rA.status_code == 201
+        victim_id = rA.json()["document_id"]
+
+        # 同用户重复上传 → 幂等返回原文档（非 409）
+        r_same = c.post(
+            "/api/v1/documents/",
+            files={"file": ("a.txt", payload, "text/plain")},
+            headers=hA,
+        )
+        assert r_same.status_code == 201
+        assert r_same.json()["document_id"] == victim_id
+
+        # 跨用户上传同内容 → 409，且不泄露 victim 的 document_id
+        rB = c.post(
+            "/api/v1/documents/",
+            files={"file": ("b.txt", payload, "text/plain")},
+            headers=hB,
+        )
+        assert rB.status_code == 409
+        assert victim_id not in rB.text
