@@ -1,6 +1,6 @@
-import { defineConfig } from 'vite'
-import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
+import { defineConfig } from 'vitest/config'
+import vue from '@vitejs/plugin-vue'
 
 export default defineConfig({
   plugins: [vue()],
@@ -8,6 +8,16 @@ export default defineConfig({
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url))
     }
+  },
+  test: {
+    // G6.1：jsdom 环境（localStorage/DOM 组件挂载）；显式 import（不启用 globals）
+    environment: 'jsdom',
+    globals: false,
+    coverage: {
+      provider: 'v8',
+      include: ['src/**/*.{ts,vue}'],
+      exclude: ['src/**/*.test.ts', 'src/main.ts'],
+    },
   },
   server: {
     // 同时监听 localhost 与 127.0.0.1：Windows 上默认 host 只绑 localhost(::1)，

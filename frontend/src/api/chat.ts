@@ -74,7 +74,7 @@ export interface StreamChatOptions {
 const EVENT_SEP = '\n\n'
 
 /** 单行解析：识别 "event: xxx" / "data: {...}" 行，返回结构化字段或 null。 */
-function parseSseLine(line: string): { event?: string; data?: string } | null {
+export function parseSseLine(line: string): { event?: string; data?: string } | null {
   const trimmed = line.trim()
   if (!trimmed) return null
   if (trimmed.startsWith(':')) return null // 注释行
@@ -89,7 +89,7 @@ function parseSseLine(line: string): { event?: string; data?: string } | null {
 }
 
 /** 把一个完整事件块（多行以 \n 分隔）聚合为 { event, data }，data 自动 JSON.parse。 */
-function parseSseBlock(block: string): { event: string; data: unknown } | null {
+export function parseSseBlock(block: string): { event: string; data: unknown } | null {
   const lines = block.split('\n')
   let event = 'message'
   const dataLines: string[] = []
