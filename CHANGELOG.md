@@ -8,6 +8,10 @@
 
 ### Fixed
 
+- **备份调度落地（G10.4）**：`docker-compose.prod.yml` 新增 `backup` sidecar 服务，与
+  backend 共用 `water_data` 卷，循环模式每 `BACKUP_INTERVAL_HOURS`（默认 24）小时把
+  DB(+WAL) + chroma 备份到卷内 `data/backups/`（保留 `BACKUP_RETENTION_DAYS` 天）——
+  此前 `BACKUP_ENABLED=true` 但没有任何服务实际调度，`up -d` 后备份永不执行。
 - **前端 SSE 健壮性（G10.3）**：流式 POST 遇到 401 时经 auth store 单飞 refresh 换新
   token 自动重放一次（此前裸 fetch 不走 axios 拦截器，30 分钟会话中途流式被 401 打断）；
   流式中断（网络抖动）在「未产出任何内容」时指数退避自动重连、复用同一助手消息，

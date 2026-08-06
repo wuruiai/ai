@@ -54,5 +54,27 @@ services:
     ports:
       - "${FRONTEND_PORT:-80}:80"
 
+  backup:
+    # S4：备份调度 sidecar——backend 镜像含 scripts，循环模式每 BACKUP_INTERVAL_HOURS
+    # 小时把 DB(+WAL) + chroma 备份到共享卷内 data/backups/（保留策略见 BACKUP_RETENTION_DAYS）。
+    # 此前 BACKUP_ENABLED=true 但没有任何服务实际调度，up -d 后备份永不执行。
+    image: ghcr.io/water-rag/water-rag-backend:${VERSION:-latest}
+    pull_policy: always
+    restart: always
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      - BACKUP_ENABLED=true
+      - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-7}
+    volumes:
+      - water_data:/app/data
+    command:
+      - python
+      - -m
+      - scripts.backup_cron
+      - --interval-hours
+      - "${BACKUP_INTERVAL_HOURS:-24}"
+
 volumes:
   water_data:
