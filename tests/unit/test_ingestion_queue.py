@@ -1,7 +1,10 @@
-"""摄取任务持久化队列测试（G4.1）。
+"""摄取任务持久化队列测试（G4.1 / G10.8）。
 
-覆盖：入队幂等、原子抢占、崩溃恢复（租约/超次数）、失败重试与终态。
+覆盖：入队幂等（含并发原子）、原子抢占、崩溃恢复（租约/超次数）、
+失败重试与终态、运行期租约续期与周期回收。
 """
+
+import asyncio
 
 from backend.db.connection import close_db, get_connection
 from backend.db.migrations import migrate
@@ -91,10 +94,24 @@ async def test_enqueue_after_failed_allows_retry(tmp_path):
     assert claimed is not None
     # 直接终态化
     await q._finalize_failed(claimed, "boom")
-    await q.enqueue("d1")  # 重传
+    assert await q.enqueue("d1") is True  # 重传：终态后允许新插入
     rows = await _task_rows("d1")
     assert len(rows) == 2
     assert any(r[1] == "pending" for r in rows)
+
+
+async def test_enqueue_atomic_no_duplicate_on_concurrent(tmp_path):
+    """G10.8 M15：并发入队同一文档只产生一条非终态任务（消除 TOCTOU 双插）。
+
+    旧实现"SELECT 查重 → INSERT"两步在并发下可能双插；原子化后
+    `INSERT ... SELECT ... WHERE NOT EXISTS` 单语句保证恰好一次插入。
+    """
+    await _migrated_db()
+    await _insert_doc("d1")
+    results = await asyncio.gather(*(q.enqueue("d1") for _ in range(5)))
+    rows = await _task_rows("d1")
+    assert len(rows) == 1
+    assert sum(results) == 1  # 仅一次真正插入，其余幂等跳过
 
 
 async def test_claim_atomic_single_worker(tmp_path):
@@ -288,3 +305,82 @@ async def test_run_task_terminal_after_max_attempts(monkeypatch, tmp_path):
     rows = await _task_rows("d1")
     assert rows[0][1] == "failed"
     assert await _doc_status("d1") == "failed"
+
+
+# ---------------------------------------------------------------------------
+# G10.8 M16：运行期租约续期 / 周期回收
+# ---------------------------------------------------------------------------
+
+
+async def test_reclaim_stale_running_task_runtime(tmp_path):
+    """G10.8 M16：worker 循环内回收超租约 running 任务（进程未重启场景自愈）。"""
+    await _migrated_db()
+    await _insert_doc("d1")
+    await q.enqueue("d1")
+    claimed = await q.claim()
+    # 模拟 worker 崩溃但进程未重启：claimed_at 已远超租约
+    db = await get_connection()
+    try:
+        await db.execute(
+            "UPDATE ingestion_tasks SET claimed_at=datetime('now','-900 seconds') WHERE task_id=?",
+            (claimed.task_id,),
+        )
+        await db.commit()
+    finally:
+        await close_db(db)
+
+    n = await q._reclaim_stale_leases()
+    assert n == 1
+    rows = await _task_rows("d1")
+    assert rows[0][1] == "pending"
+    assert rows[0][3] is None  # claimed_at 清空，可重新抢占
+
+
+async def test_reclaim_skips_live_task(tmp_path):
+    """G10.8 M16：租约内的 running 任务不被周期回收（长任务不误杀）。"""
+    await _migrated_db()
+    await _insert_doc("d1")
+    await q.enqueue("d1")
+    await q.claim()
+    n = await q._reclaim_stale_leases()
+    assert n == 0
+    rows = await _task_rows("d1")
+    assert rows[0][1] == "running"
+
+
+async def test_lease_renewal_keeps_claimed_at_fresh(monkeypatch, tmp_path):
+    """G10.8 M16：运行期续期心跳把 claimed_at 前移，防止长任务被误回收。"""
+    await _migrated_db()
+    await _insert_doc("d1")
+    await q.enqueue("d1")
+    claimed = await q.claim()
+    db = await get_connection()
+    try:
+        await db.execute(
+            "UPDATE ingestion_tasks SET claimed_at=datetime('now','-5 seconds') WHERE task_id=?",
+            (claimed.task_id,),
+        )
+        await db.commit()
+    finally:
+        await close_db(db)
+
+    # 用极短续期间隔加速测试（真实值 = LEASE//3，秒级）
+    monkeypatch.setattr(q, "RENEW_INTERVAL", 0.05)
+    renewal = asyncio.create_task(q._renew_lease(claimed.task_id))
+    try:
+        await asyncio.sleep(0.15)  # 让心跳跑几次
+    finally:
+        renewal.cancel()
+        await asyncio.gather(renewal, return_exceptions=True)
+
+    db = await get_connection()
+    try:
+        async with db.execute(
+            "SELECT claimed_at >= datetime('now','-2 seconds') "
+            "FROM ingestion_tasks WHERE task_id=?",
+            (claimed.task_id,),
+        ) as cur:
+            fresh = (await cur.fetchone())[0]
+    finally:
+        await close_db(db)
+    assert fresh == 1  # claimed_at 已被续期到最近（不再是 -5s 旧值）

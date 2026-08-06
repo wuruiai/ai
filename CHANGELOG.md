@@ -8,6 +8,13 @@
 
 ### Fixed
 
+- **任务队列入队原子化 + 租约续期（G10.8）**：① 入队从「SELECT 查重 → INSERT」两步改为单条
+  `INSERT ... SELECT ... WHERE NOT EXISTS` 原子语句——并发上传同一文档不再双插两条 pending
+  被两个 worker 抢走双重摄取（`enqueue` 返回是否真正插入，幂等可判）；② 运行期租约心跳——
+  摄取任务在执行期间每 `LEASE//3` 秒前移 `claimed_at`，长任务不被误判为「worker 已死」而
+  重抢（双重摄取）；③ worker 循环内周期性回收超租约的 `running` 任务回队 pending——此前
+  `recover_stale_tasks` 只在启动执行，worker 崩溃但进程未重启时残留任务永久卡住，文档永不
+  ready，现在运行中自愈。3 个回归测试。
 - **备份调度落地（G10.4）**：`docker-compose.prod.yml` 新增 `backup` sidecar 服务，与
   backend 共用 `water_data` 卷，循环模式每 `BACKUP_INTERVAL_HOURS`（默认 24）小时把
   DB(+WAL) + chroma 备份到卷内 `data/backups/`（保留 `BACKUP_RETENTION_DAYS` 天）——

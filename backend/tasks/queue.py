@@ -2,10 +2,12 @@
 
 把"上传即跑"的进程内 asyncio.create_task 改为 SQLite 持久化队列 + worker：
 
-    enqueue(document_id)    写入 ingestion_tasks(status='pending')，幂等
+    enqueue(document_id)    写入 ingestion_tasks(status='pending')，幂等且原子（M15）
     claim()                 原子抢占一个 pending 任务 → 'running'（attempts+1）
     worker_loop()           claim → ingest_document → 落最终态；失败可重试或标 failed
     recover_stale_tasks()   启动时回收超租约的 running 任务（回队/超次终态）
+    _renew_lease()          运行期租约续期（心跳），长任务不被周期回收误判重抢（M16）
+    _reclaim_stale_leases() worker 循环内周期性回收超租约任务（进程未重启也自愈，M16）
 
 多 worker（应用进程内 + 独立 scripts.worker 进程）共享同一 SQLite 队列，
 靠 claim 的原子 UPDATE 互斥，同一任务只会被一个 worker 抢占。
@@ -19,6 +21,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +36,9 @@ logger = get_logger(__name__)
 LEASE_SECONDS = settings.INGESTION_TASK_LEASE_SECONDS
 MAX_ATTEMPTS = settings.INGESTION_MAX_ATTEMPTS
 POLL_SECONDS = settings.INGESTION_QUEUE_POLL_SECONDS
+# G10.8 M16：租约续期/周期回收间隔。续期必须明显小于租约，否则长任务
+# 的 claimed_at 会在续期前过期，被周期回收误判为"worker 已死"重抢（双重摄取）。
+RENEW_INTERVAL = max(1, LEASE_SECONDS // 3)
 
 
 @dataclass
@@ -44,25 +50,30 @@ class ClaimedTask:
     attempts: int
 
 
-async def enqueue(document_id: str) -> None:
+async def enqueue(document_id: str) -> bool:
     """确保文档有一个待处理任务；已存在非终态任务时不重复入队。
 
     终态（ready/failed）任务需重跑时（如失败重传），会新插入一条 pending。
+    返回是否真正插入（True=入队，False=已存在非终态任务，幂等跳过）。
+
+    G10.8 M15 原子化：此前是"SELECT 查重 → INSERT"两步，并发入队同一文档时
+    两个调用都可能看到"无任务"然后各自插入 → 重复 pending 被两个 worker 抢走
+    双重摄取。改为单条 `INSERT ... SELECT ... WHERE NOT EXISTS`，查重+插入
+    在同一语句内完成（SQLite 单写者，隐式事务内原子）。
     """
     db = await get_connection()
     try:
-        async with db.execute(
-            "SELECT 1 FROM ingestion_tasks WHERE document_id=? "
-            "AND status NOT IN ('ready','failed') LIMIT 1",
-            (document_id,),
-        ) as cur:
-            if await cur.fetchone() is not None:
-                return
-        await db.execute(
-            "INSERT INTO ingestion_tasks (task_id, document_id, status) VALUES (?, ?, 'pending')",
-            (str(uuid.uuid4()), document_id),
+        cur = await db.execute(
+            "INSERT INTO ingestion_tasks (task_id, document_id, status) "
+            "SELECT ?, ?, 'pending' "
+            "WHERE NOT EXISTS ("
+            "  SELECT 1 FROM ingestion_tasks "
+            "  WHERE document_id=? AND status NOT IN ('ready','failed')"
+            ")",
+            (str(uuid.uuid4()), document_id, document_id),
         )
         await db.commit()
+        return cur.rowcount == 1
     finally:
         await close_db(db)
 
@@ -138,6 +149,57 @@ async def recover_stale_tasks() -> int:
 
 
 # ---------------------------------------------------------------------------
+# 租约续期 / 周期回收（G10.8 M16）
+# ---------------------------------------------------------------------------
+
+
+async def _renew_lease(task_id: str) -> None:
+    """运行期租约续期（心跳）：每 RENEW_INTERVAL 前移 claimed_at。
+
+    周期回收按 `claimed_at < now - LEASE` 判死——若长任务不续期，正常运行中的
+    慢摄取也会被误判为 worker 崩溃而重抢（同一任务被两个 worker 同时摄取）。
+    """
+    try:
+        while True:
+            await asyncio.sleep(RENEW_INTERVAL)
+            db = await get_connection()
+            try:
+                await db.execute(
+                    "UPDATE ingestion_tasks SET claimed_at=datetime('now') "
+                    "WHERE task_id=? AND status='running'",
+                    (task_id,),
+                )
+                await db.commit()
+            except Exception:  # noqa: BLE001 -- 续期失败下一轮再试，不阻断摄取
+                logger.warning("lease renew failed for task %s", task_id)
+            finally:
+                await close_db(db)
+    except asyncio.CancelledError:
+        return
+
+
+async def _reclaim_stale_leases() -> int:
+    """运行期回收超租约的 running 任务回队 pending。
+
+    G10.8 M16：`recover_stale_tasks` 只在启动时执行——worker 崩溃但进程未重启
+    （如另一 worker 仍在运行）时，残留 running 任务会永久卡住，文档永不 ready。
+    worker 循环内定期调用可自愈。超次数的终态判定仍由 claim 后的 `_run_task`
+    负责（attempts >= MAX → failed），这里只负责回队。
+    """
+    db = await get_connection()
+    try:
+        cur = await db.execute(
+            "UPDATE ingestion_tasks SET status='pending', claimed_at=NULL "
+            "WHERE status='running' AND claimed_at < datetime('now', ?)",
+            (f"-{LEASE_SECONDS} seconds",),
+        )
+        await db.commit()
+        return cur.rowcount
+    finally:
+        await close_db(db)
+
+
+# ---------------------------------------------------------------------------
 # worker
 # ---------------------------------------------------------------------------
 
@@ -173,6 +235,9 @@ async def _run_task(task: ClaimedTask) -> None:
 
     error_msg: str | None = None
     success = False
+    # G10.8 M16：运行期租约续期（心跳）——慢任务不被周期回收误判重抢；
+    # 任务结束（成功/失败）时取消续期，避免 dangling task
+    renewal = asyncio.create_task(_renew_lease(task.task_id))
     try:
         status = await ingest_document(Path(stored_path), task.document_id, user_id=user_id)
         success = status == IngestionStatus.READY
@@ -181,6 +246,9 @@ async def _run_task(task: ClaimedTask) -> None:
     except Exception as e:
         error_msg = str(e)[:500]
         logger.exception("task %s failed (attempt %d)", task.task_id, task.attempts)
+    finally:
+        renewal.cancel()
+        await asyncio.gather(renewal, return_exceptions=True)
 
     if success:
         await _finalize_success(task)
@@ -265,8 +333,15 @@ async def worker_loop() -> None:
         LEASE_SECONDS,
         MAX_ATTEMPTS,
     )
+    last_reclaim = 0.0
     while True:
         try:
+            # G10.8 M16：周期性回收超租约 running 任务（worker 崩溃但进程未重启的自愈）
+            if time.monotonic() - last_reclaim >= RENEW_INTERVAL:
+                reclaimed = await _reclaim_stale_leases()
+                if reclaimed:
+                    logger.warning("reclaimed %d stale task(s)", reclaimed)
+                last_reclaim = time.monotonic()
             task = await claim()
             if task is None:
                 await asyncio.sleep(POLL_SECONDS)
