@@ -17,6 +17,8 @@
  *   - 换行已归一化（兼容 CRLF / LF），详见 streamChat 内
  */
 
+import { getToken } from '@/utils/token'
+
 export interface StartEvent {
   thread_id: string
 }
@@ -118,7 +120,7 @@ export async function streamChat(opts: StreamChatOptions): Promise<void> {
 
   let response: Response
   try {
-    const token = localStorage.getItem('token')
+    const token = getToken()
     response = await fetch('/api/v1/chat/stream', {
       method: 'POST',
       headers: {

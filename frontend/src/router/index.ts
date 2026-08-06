@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { getToken } from '@/utils/token'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -37,8 +38,9 @@ const router = createRouter({
 })
 
 // 登录守卫：未登录跳转 /login；已登录访问 /login 跳首页
+// token 统一走 auth store（getToken），不直读 localStorage（G6.2 单通道）
 router.beforeEach((to) => {
-  const token = localStorage.getItem('access_token') || localStorage.getItem('token')
+  const token = getToken()
   if (to.path !== '/login' && !token) {
     return { path: '/login' }
   }
