@@ -17,6 +17,9 @@
 - **refresh 轮换原子化（G9.2）**：吊销 refresh token 改为条件 `UPDATE ... AND revoked_at
   IS NULL` + rowcount 判定，作为"是否已被用掉"的权威闸门——并发重放同一 refresh token
   时仅一次成功，其余 401，杜绝轮换双花。
+- **SSE 孤儿任务修复（G9.3）**：SSE 生成器在 `finally` 统一取消并回收 orchestrator
+  后台任务——客户端断开（`GeneratorExit`，不被 `except Exception` 捕获）不再留下孤儿
+  任务继续占用连接、消耗 LLM 额度；`unified-chat` 流式端点同样包成可取消 task。
 
 ## [1.1.0] - 2026-08-06
 

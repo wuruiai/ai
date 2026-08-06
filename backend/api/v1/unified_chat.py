@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import AsyncIterator
 
@@ -175,13 +176,19 @@ async def unified_chat_stream(
         except Exception as e:  # noqa: BLE001
             logger.warning("save user msg failed: %s", e)
 
+        # G9.3：orchestrator 放进独立 task，便于客户端断开（GeneratorExit）时统一取消
+        task = asyncio.create_task(orchestrator.handle(agent_request))
         try:
-            response = await orchestrator.handle(agent_request)
+            response = await task
         except Exception as e:
             logger.exception("orchestrator crashed")
             yield create_error_event("ORCHESTRATOR_ERROR", str(e)).format()
             return
         finally:
+            # 任何退出路径（含客户端断开 GeneratorExit）统一回收后台任务，杜绝孤儿
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
             # G3.1：token 用量落库（flush 内部兜底，失败/异常不影响回复）
             await usage_collector.flush(user.user_id, agent_type=request.agent_type)
 
