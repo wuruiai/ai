@@ -1,7 +1,4 @@
-"""水利专家咨询 Agent 状态
-
-Reference: EduAgent QA state
-"""
+"""水利专家咨询 Agent 状态"""
 
 from typing import Any
 

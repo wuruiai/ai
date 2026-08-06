@@ -2,7 +2,6 @@
 
 假设性文档生成，用于提升检索效果。
 
-Reference: EduAgent hyde_generate_node
 """
 
 from backend.core.logger import get_logger

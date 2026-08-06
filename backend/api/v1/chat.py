@@ -2,7 +2,6 @@
 
 对话接口：调 orchestrator + SSE 流式输出。
 
-Reference: §9.7
 
 事件流契约（与前端 src/api/chat.ts 对齐）：
     event: start      data: { thread_id }
@@ -109,7 +108,7 @@ async def _load_history(thread_id: str, limit: int = 6, user_id: str | None = No
     """加载该会话最近 limit 条历史消息，构造 langchain 消息列表（多轮记忆）。
 
     返回 [HumanMessage, AIMessage, ...]，供 orchestrator 注入初始 state 的 messages，
-    使 generate 节点能携带上下文回答（方案文档 §9.2 多轮对话）。
+    使 generate 节点能携带上下文回答（多轮记忆）。
     数据隔离：仅加载属于当前用户的历史。
     """
     from langchain_core.messages import AIMessage, HumanMessage
@@ -152,7 +151,7 @@ async def _load_history(thread_id: str, limit: int = 6, user_id: str | None = No
 async def _fetch_top_evidence(query: str, top_k: int = 3, user_id: str | None = None) -> list[dict]:
     """用统一混合检索（dense + sparse）拿 top-k 证据，转成 citation 事件结构。
 
-    走 retriever.retrieve()（方案 §3.4 统一检索入口）：
+    走统一检索入口 retriever.retrieve()：
       - 长查询靠 BM25 trigram 命中
       - 短查询（如"水库"）靠 dense embedding 兜底（trigram 不索引 2 字词）
     数据隔离：仅检索当前用户拥有的文档。

@@ -2,7 +2,6 @@
 
 安全工具。
 
-Reference: §10.1
 """
 
 from pathlib import Path

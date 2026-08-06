@@ -2,7 +2,6 @@
 
 支持所有 Agent 的统一入口。
 
-Reference: EduAgent unified_chat.py, §9.7
 
 事件契约：
     event: start   data: { thread_id }
@@ -28,6 +27,7 @@ from backend.core.orchestrator import (
     AgentType,
     get_orchestrator,
 )
+from backend.core.rate_limit import check_rate_limit
 from backend.core.sse import (
     create_done_event,
     create_error_event,
@@ -135,6 +135,7 @@ async def _save_assistant_message(
 async def unified_chat_stream(
     request: UnifiedChatRequest,
     user: CurrentUser = Depends(get_current_user),
+    _rl: None = Depends(check_rate_limit),
 ) -> StreamingResponse:
     """统一聊天流。"""
     orchestrator = get_orchestrator()
@@ -215,6 +216,7 @@ async def unified_chat_stream(
 async def unified_chat(
     request: UnifiedChatRequest,
     user: CurrentUser = Depends(get_current_user),
+    _rl: None = Depends(check_rate_limit),
 ):
     """统一聊天（非流式）。"""
     orchestrator = get_orchestrator()

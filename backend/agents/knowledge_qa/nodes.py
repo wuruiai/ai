@@ -2,7 +2,6 @@
 
 包含 HyDE、多查询重写、置信度路由等高级功能。
 
-Reference: §8.2, EduAgent QA nodes
 """
 
 from typing import Any
@@ -133,7 +132,7 @@ async def rerank_node(state: KnowledgeQAState) -> dict[str, Any]:
     # 提取文档内容
     documents = [e["content"] for e in evidence]
 
-    # 执行重排序（失败降级：直接用原始检索结果，方案文档 §2.1 "Rerank 失败可降级"）
+    # 执行重排序（失败降级：直接用原始检索结果，即"Rerank 失败可降级"策略）
     fallback_used = False
     try:
         reranked = await rerank(query, documents)

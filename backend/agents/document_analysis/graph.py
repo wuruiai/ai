@@ -2,7 +2,6 @@
 
 指定文档分析 Agent 图。
 
-Reference: §8.2
 """
 
 from langgraph.graph import END, StateGraph

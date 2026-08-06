@@ -2,7 +2,6 @@
 
 混合检索器。
 
-Reference: §6.4
 """
 
 from dataclasses import dataclass
@@ -46,7 +45,7 @@ async def retrieve(
     document_id: str | None = None,
     user_id: str | None = None,
 ) -> list[RetrievalResult]:
-    """混合检索：dense + sparse 加权融合（§6.4）。
+    """混合检索：dense + sparse 加权融合。
 
     融合策略：
         1. 向量检索（cosine 距离，越小越相关）→ 归一化

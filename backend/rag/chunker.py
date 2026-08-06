@@ -2,7 +2,6 @@
 
 文档切分器。
 
-Reference: §5.5
 """
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter

@@ -2,7 +2,6 @@
 
 反馈接口。
 
-Reference: §9.3
 
 流程：
     1. 校验 message_id 在 messages 表真实存在（外键链）
@@ -57,7 +56,7 @@ async def submit_feedback(
     db = await get_connection()
     try:
         if not await _message_exists(db, feedback.message_id):
-            # 文档 §9.3：拒绝任填 UUID，验证外键链
+            # 拒绝任填 UUID，验证外键链（防伪造关联）
             raise HTTPException(status_code=404, detail="message_id not found")
         # 数据隔离：只能给属于自己的消息反馈（管理员除外），否则一律 404 不暴露存在性
         if user.role != "admin":

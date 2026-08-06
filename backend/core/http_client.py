@@ -2,7 +2,6 @@
 
 httpx.AsyncClient 封装。
 
-Reference: §4.3
 """
 
 import httpx

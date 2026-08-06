@@ -2,7 +2,6 @@
 
 全文检索封装。
 
-Reference: §5.4 / §6.7
 
 chunks_fts 是 external content 模式（content='chunks'，content_rowid='rowid'）：
     - FTS 索引只存分词结果，不重复存 content

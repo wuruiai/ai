@@ -2,7 +2,6 @@
 
 将一个问题改写成多个角度的查询，提升检索召回率。
 
-Reference: EduAgent multi_query_rewrite_node
 """
 
 from backend.config import settings

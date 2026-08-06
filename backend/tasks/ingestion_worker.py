@@ -2,7 +2,6 @@
 
 后台任务处理。
 
-Reference: §5.1
 
 状态机：
     pending → parsing → chunking → embedding → indexing → ready

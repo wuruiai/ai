@@ -2,7 +2,6 @@
 
 指定文档分析 Agent 状态。
 
-Reference: §8.3
 
 继承 MessagesState（与其他 Agent 一致）：
     - LangGraph 会把 state 作为 dict 传入节点，节点内可用 state.get()

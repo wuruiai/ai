@@ -2,7 +2,6 @@
 
 Server-Sent Events 工具。
 
-Reference: §9.7
 """
 
 import json

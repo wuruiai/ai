@@ -2,7 +2,6 @@
 
 重排序器。
 
-Reference: §4.2
 """
 
 from backend.config import settings

@@ -2,7 +2,6 @@
 
 指定文档分析 Agent 提示词。
 
-Reference: §8.2
 """
 
 PROMPT_VERSION = "1.0.0"

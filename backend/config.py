@@ -2,7 +2,6 @@
 
 使用 pydantic-settings 管理所有配置项。
 
-Reference: §3.2
 """
 
 from functools import lru_cache

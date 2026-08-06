@@ -2,7 +2,6 @@
 
 知识库问答 Agent 图。
 
-Reference: §8.2, EduAgent QA graph
 """
 
 from langgraph.graph import END, START, StateGraph
@@ -101,7 +100,7 @@ def build_knowledge_qa_graph():
     builder.add_edge("save_memory", END)
 
     # 编译
-    # 不用 checkpointer：多轮记忆由 chat.py 从 DB 加载历史并注入初始 state（方案 §9.2）。
+    # 不用 checkpointer：多轮记忆由 chat.py 从 DB 加载历史并注入初始 state。
     # 若再叠加 MemorySaver，orchestrator 注入的 DB 历史 + checkpointer 内的历史会重复，
     # 每轮消息翻倍、浪费 token 且把重复内容当新信息。
     return builder.compile()

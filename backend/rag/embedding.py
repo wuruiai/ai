@@ -2,7 +2,6 @@
 
 向量化工具，直接调 DashScope 兼容的 OpenAI 协议端点。
 
-Reference: §4.2
 
 注：langchain_openai 1.1.10 的 OpenAIEmbeddings 在 list 文档场景会把 list
 错误地序列化为 str，dashscope-compatible 端点会回 400 InvalidParameter。
@@ -24,7 +23,7 @@ def _get_client() -> AsyncOpenAI:
         _client = AsyncOpenAI(
             api_key=settings.DASHSCOPE_API_KEY,
             base_url=settings.DASHSCOPE_BASE_URL,
-            # 偶发限流/超时自动重试（方案文档 §4.4）
+            # 偶发限流/超时自动重试
             max_retries=max(2, settings.MAX_RETRIES),
             timeout=settings.LLM_TIMEOUT_S,
         )

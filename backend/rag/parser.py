@@ -2,7 +2,6 @@
 
 文档解析器（run_in_executor）。
 
-Reference: §5.6
 """
 
 import asyncio

@@ -1,7 +1,4 @@
-"""水利专家咨询 Agent 提示词
-
-Reference: EduAgent QA prompts
-"""
+"""水利专家咨询 Agent 提示词"""
 
 PROMPT_VERSION = "1.0.0"
 

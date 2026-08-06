@@ -2,7 +2,6 @@
 
 文档和 chunk 的 ID 生成。
 
-Reference: §5.3
 """
 
 import hashlib

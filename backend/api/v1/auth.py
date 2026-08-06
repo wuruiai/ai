@@ -9,7 +9,6 @@
     - 登录防爆破：ip|username 双维度失败锁定（G1.1）
     - 生产环境启动强校验 TOKEN_SECRET / DASHSCOPE_API_KEY（G1.3，见 config.ensure_secrets）
 
-Reference: §9.6 / §10.1
 """
 
 from __future__ import annotations

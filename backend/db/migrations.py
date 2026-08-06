@@ -2,7 +2,6 @@
 
 数据库迁移管理。
 
-Reference: §3.7
 
 约定：
     - 版本号单调递增；缺迁移表视为 version 0
@@ -215,7 +214,7 @@ async def _migrate_v1(db: aiosqlite.Connection) -> None:
     )
     await db.execute("CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status)")
 
-    # chunks：物理 chunk 存储（id 用 §5.3 稳定规则）
+    # chunks：物理 chunk 存储（id 用内容哈希派生，重传不产生重复 chunk）
     await db.execute(
         """
         CREATE TABLE IF NOT EXISTS chunks (

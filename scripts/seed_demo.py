@@ -15,7 +15,7 @@ import hashlib
 import sys
 from pathlib import Path
 
-# 添加项目根目录到 Python 路径
+# 脚本独立运行：未 pip install 时把项目根加入 sys.path，保证 backend 包可直接导入
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 DEMO_TEXT = """水利工程是用于控制和调配自然界的地表水和地下水，达到除害兴利目的而修建的工程。

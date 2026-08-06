@@ -2,7 +2,6 @@
 
 类似 EduAgent 的通用问答 Agent，用于回答水利行业的通用问题。
 
-Reference: EduAgent QA graph
 """
 
 from langgraph.graph import END, START, StateGraph

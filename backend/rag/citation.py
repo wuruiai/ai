@@ -7,7 +7,6 @@
 coverage 达标 → 该引用"已核实"（verified=True）；否则标记"待核实"，
 前端用不同样式提示用户——该引用可能是 LLM 自说自话，需要人工复核。
 
-Reference: §7.3
 """
 
 from __future__ import annotations

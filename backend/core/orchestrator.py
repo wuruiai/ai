@@ -2,7 +2,6 @@
 
 Agent 调度和编排，支持单 Agent 和 Pipeline 模式。
 
-Reference: §8.1, EduAgent orchestrator
 """
 
 from enum import StrEnum

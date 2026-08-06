@@ -2,7 +2,6 @@
 
 文档管理接口。
 
-Reference: §9.6
 
 P0 行为：
     POST   /api/v1/documents/        上传文件，异步启动 ingestion，立即返回 PENDING

@@ -4,7 +4,6 @@
 - `GET /health/ready`  就绪探针：SQLite + Chroma 依赖可达才 200，否则 503（供编排系统摘流）
 - `GET /metrics`       Prometheus 指标文本（G2.2，供抓取）
 
-Reference: §9.6 / §3.4
 """
 
 from __future__ import annotations

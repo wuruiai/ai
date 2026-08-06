@@ -2,7 +2,6 @@
 
 调用预算管理。
 
-Reference: §4.8
 
 单进程用内存后端；设 `REDIS_URL` 后工厂返回 Redis 后端（跨进程共享计数）。
 public 名字 `BudgetManager` 保留（即内存实现），模块单例 `budget_manager` 走工厂。

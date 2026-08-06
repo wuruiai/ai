@@ -2,7 +2,6 @@
 
 指定文档分析 Agent 节点：加载 → 提取结构 → 分析 → 摘要 → 组装。
 
-Reference: §8.2
 
 流程：
     load_document     : 从指定文档（document_id）检索 chunks

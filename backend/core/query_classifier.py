@@ -2,7 +2,6 @@
 
 使用 LLM 进行查询分类（云端方案，不需要本地模型）。
 
-Reference: EduAgent query_classifier.py
 """
 
 from enum import StrEnum

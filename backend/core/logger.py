@@ -9,7 +9,6 @@
 - `get_logger` 首次调用时自动触发 `setup_logging()`，任何入口（uvicorn / 运维脚本 / 测试）都不会拿到
   无 handler 的 logger。uvicorn 自身日志由其独立 logger 输出，保持默认文本，不影响本应用 JSON 化。
 
-Reference: §3.2
 """
 
 from __future__ import annotations

@@ -2,7 +2,6 @@
 
 API 路由注册。
 
-Reference: §9.6, EduAgent router
 """
 
 from fastapi import APIRouter

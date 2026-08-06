@@ -2,7 +2,6 @@
 
 知识库问答 Agent 状态。
 
-Reference: §8.3, EduAgent QA state
 """
 
 from typing import Any

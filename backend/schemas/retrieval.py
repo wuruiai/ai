@@ -2,7 +2,6 @@
 
 检索数据模型。
 
-Reference: §6.4
 """
 
 from pydantic import BaseModel

@@ -2,7 +2,6 @@
 
 知识库问答 Agent 提示词。
 
-Reference: §8.2, EduAgent QA prompts
 """
 
 PROMPT_VERSION = "1.0.0"

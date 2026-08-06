@@ -2,7 +2,6 @@
 
 诊断接口。
 
-Reference: §9.6
 """
 
 from fastapi import APIRouter, Depends

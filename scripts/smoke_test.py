@@ -28,7 +28,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-# 添加项目根目录到 Python 路径
+# 脚本独立运行：未 pip install 时把项目根加入 sys.path，保证 backend 包可直接导入
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from tests.smoke._runner import backend_running

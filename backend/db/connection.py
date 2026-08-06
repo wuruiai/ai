@@ -2,9 +2,8 @@
 
 数据库连接管理。
 
-Reference: §3.5
 
-四条 PRAGMA 的必要性（按文档 §3.5）：
+四条 PRAGMA 的必要性：
     - journal_mode=WAL        : 读写不互斥，SSE 长连接期间仍可读
     - foreign_keys=ON         : 连接级！不显式开启则外键形同虚设
     - busy_timeout=5000       : 写锁等待 5 秒，避免短时锁竞争立即失败

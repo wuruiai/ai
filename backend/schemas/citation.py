@@ -2,7 +2,6 @@
 
 引用数据模型。
 
-Reference: §7.1
 """
 
 from pydantic import BaseModel

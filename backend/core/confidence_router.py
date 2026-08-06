@@ -9,7 +9,6 @@
 - 改用**顶分 + 领先 margin** 双条件：顶分足够高，且明显高于次高（证据"唯一且强烈"）→ HIGH。
   这是 min-max 归一化下更稳的相对置信度信号。
 
-Reference: EduAgent QA graph confidence routing
 """
 
 from enum import StrEnum

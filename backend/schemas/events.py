@@ -2,7 +2,6 @@
 
 事件数据模型。
 
-Reference: §9.7
 """
 
 from pydantic import BaseModel

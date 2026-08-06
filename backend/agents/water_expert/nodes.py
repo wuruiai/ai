@@ -1,7 +1,4 @@
-"""水利专家咨询 Agent 节点
-
-Reference: EduAgent QA nodes
-"""
+"""水利专家咨询 Agent 节点"""
 
 from typing import Any
 

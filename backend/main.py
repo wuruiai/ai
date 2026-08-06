@@ -2,7 +2,6 @@
 
 FastAPI 应用生命周期管理。
 
-Reference: §8.1
 """
 
 from __future__ import annotations

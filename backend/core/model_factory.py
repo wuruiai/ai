@@ -2,7 +2,6 @@
 
 模型工厂，统一管理云模型调用。
 
-Reference: §4.2
 """
 
 from langchain_openai import ChatOpenAI
@@ -19,7 +18,7 @@ class ModelFactory:
         temperature: float = 0.7,
         callbacks: list | None = None,
     ):
-        """创建 LLM 实例（含重试与超时，见方案文档 §4.4）。
+        """创建 LLM 实例（含重试与超时）。
 
         callbacks: 传 TokenStreamHandler 列表时开启 streaming，
         便于 SSE 端逐 token 推送（真流式）。
