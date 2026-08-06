@@ -7,6 +7,7 @@ FastAPI 应用生命周期管理。
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
@@ -20,7 +21,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.api.router import api_router
 from backend.config import settings
-from backend.core.logger import get_logger, set_request_id, setup_logging
+from backend.core.logger import get_logger, set_request_id, setup_logging, unify_uvicorn_logging
 from backend.core.metrics import instrument_request
 from backend.db.connection import close_db, get_connection
 from backend.db.migrations import migrate
@@ -29,6 +30,10 @@ from backend.tasks.queue import recover_stale_tasks, worker_loop
 # 统一 JSON 结构化日志（幂等，首次导入即完成根 logger 配置）
 setup_logging()
 logger = get_logger(__name__)
+
+# G10.9 M11：结构化 access 日志（替代 uvicorn 默认文本 access log）。
+# 独立 logger 名便于按模块过滤/告警；propagate 到根 → JsonFormatter 落 JSON。
+access_logger = logging.getLogger("app.access")
 
 # 前端构建产物目录（npm run build 输出）
 _FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
@@ -39,6 +44,9 @@ async def lifespan(app: FastAPI):
     """应用生命周期"""
     # 生产环境密钥强校验：缺失关键 secret 直接拒绝启动（G1.3 fail-fast）
     settings.ensure_secrets()
+    # G10.9 M11：uvicorn 自身日志并入根 JSON + 关闭默认 access log
+    # （须在 lifespan 里做——uvicorn 的 dictConfig 在 server 启动时覆盖日志配置）
+    unify_uvicorn_logging()
     # 启动时：确保数据库迁移完成（幂等）、Chroma 集合可用
     logger.info("Starting Water RAG + Agent (app=%s)", app.title)
     try:
@@ -109,12 +117,25 @@ app.add_middleware(
 )
 
 
+def _client_ip(request: Request) -> str:
+    """真实客户端 IP：优先 X-Forwarded-For 最左侧（反代后首个跳），回退直连地址。
+
+    与 auth 限流/审计的 IP 解析保持一致（M6），保证 access 日志里记录的是用户 IP。
+    """
+    xff = request.headers.get("X-Forwarded-For")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else ""
+
+
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
-    """请求中间件：注入 X-Request-ID + 打点 Prometheus 指标。
+    """请求中间件：注入 X-Request-ID + 打点 Prometheus 指标 + 结构化 access 日志。
 
     - 把 request_id 写入 contextvar，让本请求内所有结构化日志自动携带该字段（G2.1）。
     - 统计每个请求的耗时/状态码/路径到 http_requests_total / http_request_duration_seconds（G2.2）。
+    - G10.9 M11：输出结构化 access 日志（method/path/status/duration_ms/client 字段），
+      替代 uvicorn 默认文本 access log——统一可观测性，Loki/ELK 可直接聚合。
     """
     request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
     set_request_id(request_id)
@@ -127,6 +148,16 @@ async def add_request_id(request: Request, call_next):
         # 无论成功/异常都打点；异常时 call_next 抛错，状态记为 500 后继续上抛
         duration_s = (perf_counter_ns() - start_ns) / 1e9
         instrument_request(request.method, request.url.path, status, duration_s)
+        access_logger.info(
+            "http request",
+            extra={
+                "method": request.method,
+                "path": request.url.path,
+                "status": status,
+                "duration_ms": round(duration_s * 1000, 1),
+                "client": _client_ip(request),
+            },
+        )
     response.headers["X-Request-ID"] = request_id
     return response
 

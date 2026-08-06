@@ -14,6 +14,9 @@
             <div class="brand-name">水利 RAG</div>
             <div class="brand-sub">知识问答平台</div>
           </div>
+          <span v-if="version" class="brand-version" :title="`后端版本 v${version}`">
+            v{{ version }}
+          </span>
         </div>
 
         <nav class="sidebar-nav">
@@ -57,14 +60,27 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import BoundaryRouterView from '@/components/BoundaryRouterView.vue'
+import { getHealth } from '@/api/system'
 
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
+
+// G10.9 M12：后端版本对齐——从 /health（单一来源 backend.__version__）拉取，失败静默
+const version = ref('')
+onMounted(async () => {
+  try {
+    const health = await getHealth()
+    version.value = health.version
+  } catch {
+    // 后端不可达（开发/网络异常）时隐藏版本徽标，不阻塞页面
+    version.value = ''
+  }
+})
 
 const avatarChar = computed(() =>
   (authStore.user?.display_name || authStore.user?.username || '?').charAt(0).toUpperCase()
@@ -117,6 +133,17 @@ function logout() {
   font-size: 11px;
   color: var(--sidebar-text);
   margin-top: 2px;
+}
+.brand-version {
+  margin-left: auto;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--sidebar-text);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  padding: 4px 7px;
+  white-space: nowrap;
 }
 
 .sidebar-nav {

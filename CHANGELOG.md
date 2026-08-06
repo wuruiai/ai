@@ -6,6 +6,21 @@
 
 ## [Unreleased]
 
+### Added
+
+- **LLM 调用指标（G10.9 M10）**：Prometheus `/metrics` 新增按 model 分维度的
+  `llm_calls_total` / `llm_tokens_total{kind=input|output}` / `llm_call_duration_seconds`
+  / `llm_cost_cny_total`——`UsageCollector` 逐 LLM 调用打点（`on_llm_start` 记延迟起点，
+  `on_llm_end` 落点），与 `llm_usage` 明细表互补，Grafana 可直接看 LLM 调用量、token 消耗、
+  延迟与成本趋势；异常/降级调用（无 usage）也记次数与延迟。4 个回归测试。
+- **日志统一（G10.9 M11）**：uvicorn 自身日志（启动/生命周期）并入根 JSON logger，其默认
+  文本 access log 关闭——HTTP 中间件改输出**结构化** access 日志（`method`/`path`/`status`/
+  `duration_ms`/`client` 字段，经 `X-Forwarded-For` 解析真实客户端 IP），Loki/ELK 直接可
+  聚合，告别"应用 JSON + uvicorn 文本"两种格式混排。3 个回归测试。
+- **前端版本对齐后端（G10.9 M12）**：前端侧边栏品牌区展示后端版本徽标 `vX.Y.Z`，从
+  `/health`（版本单一来源 `backend.__version__`）拉取，后端不可达时静默隐藏不阻塞页面——
+  前端部署版本与后端始终一致可核对。3 个前端测试。
+
 ### Fixed
 
 - **任务队列入队原子化 + 租约续期（G10.8）**：① 入队从「SELECT 查重 → INSERT」两步改为单条

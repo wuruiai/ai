@@ -10,6 +10,7 @@ TokenStreamHandler 只负责逐 token 推送；UsageCollector 作为同一回调
 
 from __future__ import annotations
 
+import time
 import uuid
 from typing import Any
 
@@ -17,6 +18,7 @@ from langchain_core.callbacks.base import BaseCallbackHandler
 
 from backend.config import settings
 from backend.core.logger import get_logger
+from backend.core.metrics import record_llm_call
 from backend.db.connection import close_db, get_connection
 
 logger = get_logger(__name__)
@@ -46,6 +48,12 @@ class UsageCollector(BaseCallbackHandler):
         # 流式路径：langchain-openai 1.x 在 on_llm_end 聚合结果里不带 usage，
         # 改为从流式 chunk 的 usage_metadata 捕获（每轮调用至多一个 chunk 带 usage）
         self._stream_usage: tuple[int, int, str] | None = None
+        # G10.9 M10：单次调用开始时间（on_llm_start 置位，on_llm_end 计算延迟后清空）
+        self._call_started: float | None = None
+
+    def on_llm_start(self, serialized: dict, prompts: list[str], **kwargs: Any) -> None:
+        """记录调用开始时间，供 on_llm_end 计算该次 LLM 延迟（G10.9 M10）。"""
+        self._call_started = time.perf_counter()
 
     @property
     def has_usage(self) -> bool:
@@ -80,11 +88,31 @@ class UsageCollector(BaseCallbackHandler):
                 prompt, completion, model = self._stream_usage
                 self._stream_usage = None
             else:
-                return  # 无 usage 信息（异常/降级/测试 stub），静默跳过
+                # 无 usage 信息（异常/降级/测试 stub）：仍打点次数+延迟，不累加记账
+                self._record_metric(prompt or 0, completion or 0, model)
+                return
         self.input_tokens += prompt
         self.output_tokens += completion
         if model:
             self.model = model
+        self._record_metric(prompt, completion, model)
+
+    def _record_metric(self, prompt: int, completion: int, model: str) -> None:
+        """G10.9 M10：逐调用打点 Prometheus LLM 指标（延迟/token/成本）。"""
+        started = self._call_started
+        self._call_started = None
+        duration_s = (time.perf_counter() - started) if started is not None else 0.0
+        try:
+            record_llm_call(
+                model or settings.LLM_MODEL,
+                prompt,
+                completion,
+                usage_cost_cny(prompt, completion),
+                duration_s,
+            )
+        except Exception:
+            # exc_info=True 已把异常记入日志，BLE001 豁免（非盲目吞掉）
+            logger.warning("record llm metric failed", exc_info=True)
 
     async def flush(self, user_id: str, agent_type: str = "knowledge_qa") -> None:
         """把累计用量写入 llm_usage 表（append-only；调用方负责只调一次）。"""

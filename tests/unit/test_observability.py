@@ -1,8 +1,14 @@
-"""可观测性测试：健康/就绪探针 + Prometheus 指标 + 路径归一化（G2.1-G2.3）。"""
+"""可观测性测试：健康/就绪探针 + Prometheus 指标 + 路径归一化 + LLM 指标 + 日志统一。
+
+覆盖 G2.1-G2.3 与 G10.9（M10 LLM 指标、M11 结构化 access 日志 / uvicorn 日志并入 JSON）。
+"""
+
+import logging
 
 from fastapi.testclient import TestClient
 
-from backend.core.metrics import normalize_path
+from backend.core.metrics import normalize_path, record_llm_call, render_metrics
+from backend.core.usage import UsageCollector
 from backend.db.migrations import SCHEMA_VERSION
 from backend.main import app
 
@@ -73,3 +79,103 @@ def test_request_id_echoed():
     with TestClient(app) as c:
         r = c.get("/health", headers={"X-Request-ID": "trace-001"})
         assert r.headers.get("X-Request-ID") == "trace-001"
+
+
+# ---------------------------------------------------------------------------
+# G10.9 M10：LLM 指标（调用次数 / token / 延迟 / 成本）
+# ---------------------------------------------------------------------------
+
+
+def test_record_llm_call_emits_metrics():
+    """record_llm_call 打点后 /metrics 含对应 LLM 样本（按 model 分维度）。
+
+    用唯一 model 名隔离，避免跨测试累加到全局 Counter 造成断言污染。
+    """
+    model = "test-llm-metrics-model"
+    record_llm_call(model, 10, 20, 0.03, 1.5)
+    text = render_metrics().decode()
+    # 标签按字典序输出（prometheus_client）：kind < model
+    assert f'llm_calls_total{{model="{model}"}} 1.0' in text
+    assert f'llm_tokens_total{{kind="input",model="{model}"}} 10.0' in text
+    assert f'llm_tokens_total{{kind="output",model="{model}"}} 20.0' in text
+    assert f'llm_cost_cny_total{{model="{model}"}} 0.03' in text
+    assert f'llm_call_duration_seconds_count{{model="{model}"}} 1.0' in text
+
+
+def test_usage_collector_records_llm_metrics_per_call():
+    """UsageCollector.on_llm_end 逐调用打点 LLM 指标（集成：延迟+token+成本）。"""
+
+    class _Resp:
+        def __init__(self, model: str):
+            self.llm_output = {
+                "token_usage": {"prompt_tokens": 8, "completion_tokens": 12},
+                "model_name": model,
+            }
+            self.generations = []
+
+    model = "test-usage-collector-model"
+    collector = UsageCollector()
+    collector.on_llm_start({}, ["问题"])
+    collector.on_llm_end(_Resp(model))
+
+    text = render_metrics().decode()
+    assert f'llm_calls_total{{model="{model}"}} 1.0' in text
+    assert f'llm_tokens_total{{kind="input",model="{model}"}} 8.0' in text
+    assert f'llm_tokens_total{{kind="output",model="{model}"}} 12.0' in text
+    # 记账同步累加（与指标不冲突）
+    assert collector.input_tokens == 8
+    assert collector.output_tokens == 12
+    assert collector.model == model
+
+
+def test_usage_collector_records_latency_even_without_usage():
+    """无 usage 信息（异常/降级路径）仍打点调用次数 + 延迟，不累加记账。"""
+
+    class _Resp:
+        def __init__(self):
+            self.llm_output = {"model_name": "test-usage-no-token-model"}
+            self.generations = []
+
+    model = "test-usage-no-token-model"
+    collector = UsageCollector()
+    collector.on_llm_start({}, ["问题"])
+    collector.on_llm_end(_Resp())
+
+    text = render_metrics().decode()
+    assert f'llm_calls_total{{model="{model}"}} 1.0' in text
+    # 无 token：记账保持 0
+    assert collector.has_usage is False
+
+
+# ---------------------------------------------------------------------------
+# G10.9 M11：日志统一——结构化 access 日志 + uvicorn 日志并入根 JSON
+# ---------------------------------------------------------------------------
+
+
+def test_access_log_is_structured_json(caplog):
+    """中间件输出结构化 access 日志：method/path/status/duration_ms/client 字段。"""
+    with caplog.at_level(logging.INFO):
+        with TestClient(app) as c:
+            c.get("/health", headers={"X-Forwarded-For": "203.0.113.7"})
+    access = [r for r in caplog.records if r.name == "app.access"]
+    assert access, "access log 未输出"
+    last = access[-1]
+    assert last.message == "http request"
+    assert last.method == "GET"
+    assert last.path == "/health"
+    assert last.status == 200
+    assert last.duration_ms is not None
+    # 经 X-Forwarded-For 解析到真实客户端 IP（与 auth 限流口径一致）
+    assert last.client == "203.0.113.7"
+
+
+def test_unify_uvicorn_logging_inherits_root_json():
+    """uvicorn 日志并入根 JSON：关闭默认 access、error 向根 propagate。"""
+    from backend.core.logger import unify_uvicorn_logging
+
+    unify_uvicorn_logging()
+    assert logging.getLogger("uvicorn.access").disabled is True
+    for name in ("uvicorn", "uvicorn.error"):
+        lg = logging.getLogger(name)
+        assert lg.propagate is True
+        assert lg.handlers == []  # 不再用 uvicorn 默认文本 handler

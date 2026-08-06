@@ -36,7 +36,40 @@ def get_request_id() -> str:
 
 
 class JsonFormatter(logging.Formatter):
-    """单行 JSON 格式化器：{ts, level, logger, message, request_id?, exc_info?}"""
+    """单行 JSON 格式化器：{ts, level, logger, message, request_id?, *extra?, exc_info?}
+
+    除固定字段外，`logging.info(msg, extra={...})` 传入的额外字段也会序列化
+    （排除 LogRecord 标准属性）——结构化 access 日志等场景直接以字段形式落 JSON，
+    而非拼进 message 字符串。
+    """
+
+    # LogRecord 标准属性：不序列化（否则每行都带 thread/lineno 等噪声）
+    _STD_ATTRS = frozenset(
+        {
+            "name",
+            "msg",
+            "args",
+            "levelname",
+            "levelno",
+            "pathname",
+            "filename",
+            "module",
+            "exc_info",
+            "exc_text",
+            "stack_info",
+            "lineno",
+            "funcName",
+            "created",
+            "msecs",
+            "relativeCreated",
+            "thread",
+            "threadName",
+            "processName",
+            "process",
+            "taskName",
+            "message",
+        }
+    )
 
     def format(self, record: logging.LogRecord) -> str:
         entry = {
@@ -48,9 +81,15 @@ class JsonFormatter(logging.Formatter):
         req_id = request_id_ctx.get()
         if req_id:
             entry["request_id"] = req_id
+        # extra 字段：非标准属性且非下划线开头即视为结构化字段
+        for key, value in record.__dict__.items():
+            if key in self._STD_ATTRS or key.startswith("_"):
+                continue
+            entry[key] = value
         if record.exc_info:
             entry["exc_info"] = self.formatException(record.exc_info)
-        return json.dumps(entry, ensure_ascii=False)
+        # default=str：任何额外字段值均可 JSON 序列化，日志格式化永不抛错
+        return json.dumps(entry, ensure_ascii=False, default=str)
 
 
 _configured = False
@@ -86,6 +125,26 @@ def setup_logging() -> None:
     except OSError:
         # 文件日志不可用（只读容器等）只影响落盘，不影响控制台日志
         pass
+
+
+def unify_uvicorn_logging() -> None:
+    """把 uvicorn 自身日志并入根 JSON，关闭其默认文本 access log（G10.9 M11）。
+
+    - uvicorn.error / uvicorn（启动、生命周期）解除默认 handler，改向根 logger
+      propagate → 复用 JsonFormatter，与应用日志格式统一。
+    - uvicorn.access（默认"INFO: 127.0.0.1:xxxx - "GET /health HTTP/1.1" 200"文本行）
+      直接禁用——结构化 access 日志由 HTTP 中间件按字段输出（见 main.add_request_id），
+      避免双写且格式不一致。
+
+    必须在应用启动（lifespan startup）时调用：uvicorn 在 server 启动阶段通过
+    dictConfig 覆盖日志配置，早于该时点的修改会被重置。
+    """
+    access = logging.getLogger("uvicorn.access")
+    access.disabled = True
+    for name in ("uvicorn", "uvicorn.error"):
+        lg = logging.getLogger(name)
+        lg.handlers = []
+        lg.propagate = True
 
 
 def get_logger(name: str) -> logging.Logger:
