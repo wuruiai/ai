@@ -6,11 +6,17 @@
 
 ```bash
 docker compose up -d --build
-# 前端 http://localhost:80 ，后端 http://localhost:8001
+# 前端 http://localhost:8080 ，后端 http://localhost:8001
+# 端口可经 FRONTEND_PORT 覆盖（默认 8080）
 ```
 
 开发清单 `docker-compose.yml` 本地构建两个镜像：后端（python:3.11-slim + 清华 pip 镜像）、
 前端（node:20 多阶段构建 → nginx，内置 `frontend/.npmrc` 国内镜像规避官方源卡顿）。
+
+**容器最小权限（G10.10）**：后端以专用 `appuser`（uid 1000）运行、前端 nginx 以 `nginx`
+用户运行（非 root，仅能监听非特权端口 8080）。后端数据落在 `/app/data`——生产用命名卷
+`water_data`，首挂载自动继承镜像内属主（appuser）无需额外配置；本地 bind mount
+`./data` 需宿主目录对 uid 1000 可写（Docker Desktop 默认即满足）。
 
 ### 生产形态（预构建镜像）
 

@@ -60,6 +60,16 @@
 
 ### Security
 
+- **容器最小权限 + nginx 加固（G10.10）**：① 后端镜像新增专用 `appuser`（uid 1000）并以
+  `USER appuser` 运行，数据/日志目录归其所有（命名卷首挂载自动继承属主，bind mount 见
+  deployment.md 说明）——此前整个后端进程以 root 运行；② 前端 nginx 同样非 root：主进程以
+  `nginx` 用户运行、绕过需要写 `/etc` 的默认 entrypoint 脚本、仅监听非特权端口 8080
+  （`FRONTEND_PORT` 可覆盖），pid/缓存/日志目录预先归 nginx 所有；③ nginx 加固——隐藏
+  版本号（`server_tokens off`）、gzip 压缩（静态资源 + API JSON）、`/assets/` 带 hash
+  构建产物强缓存 immutable、`index.html` 不缓存（前端版本随时对齐后端）、安全响应头
+  （CSP / `X-Content-Type-Options` / `X-Frame-Options` / `Referrer-Policy` /
+  `Permissions-Policy`，含错误响应）。已实容器验证：后端进程 uid=1000 可写数据并启动，
+  前端进程 uid=101 正常伺服且响应头齐全。
 - **成本记账补全 + 失败路径对齐 + 禁用文档生效（G10.7）**：① 检索链路上的辅助 LLM
   （查询分类器 / HyDE / 多查询改写）接入 `llm_callbacks` 用量链——此前这三类调用创建 LLM
   时不带回调，token 消耗是 llm_usage 的成本黑洞；② 预算 `record_call` 移入流式端点

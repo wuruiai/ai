@@ -1,0 +1,12 @@
+# G10.10 M13 安全响应头（纵深防御）。按需 include：
+# - 服务器级 include 一次 → 覆盖所有未自定义缓存头的位置（/api、/health、SPA 页）
+# - /assets/ 与 /index.html 设置了各自的 Cache-Control，会断开 add_header 继承，
+#   需在 location 内再 include 一次（见 nginx.conf）。
+# 文件不以 .conf 结尾：避免被 /etc/nginx/conf.d/*.conf 自动加载，全部显式 include。
+# `always`：错误响应（4xx/5xx）也带这些头。
+add_header X-Content-Type-Options nosniff always;
+add_header X-Frame-Options SAMEORIGIN always;
+add_header Referrer-Policy strict-origin-when-cross-origin always;
+add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+# CSP 适配 Vue SPA 生产构建：脚本仅 self；运行时内联样式放行；同源 /api + SSE 走 connect-src
+add_header Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'" always;

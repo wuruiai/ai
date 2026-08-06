@@ -12,8 +12,17 @@ RUN pip install --no-cache-dir -r requirements.lock.txt \
 COPY backend/ backend/
 COPY scripts/ scripts/
 
+# G10.10 M8 非 root 运行（纵深防御基线）：创建专用用户，数据/日志目录归其所有。
+# 说明：prod 用命名卷 water_data，首挂载会继承镜像内 /app/data 的属主（appuser）；
+# 本地 bind mount（./data）时需宿主目录对 uid 1000 可写（Docker Desktop 默认即可）。
+RUN useradd --create-home --uid 1000 appuser \
+    && mkdir -p /app/data \
+    && chown -R appuser:appuser /app
+
 # 关闭 Chroma 遥测：容器无外网时会刷 "Failed to send telemetry event ..." 噪声
 ENV ANONYMIZED_TELEMETRY=False
+
+USER appuser
 
 # 启动前自动跑迁移（幂等）
 EXPOSE 8001

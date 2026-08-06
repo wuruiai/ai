@@ -52,7 +52,7 @@ services:
       backend:
         condition: service_healthy
     ports:
-      - "${FRONTEND_PORT:-80}:80"
+      - "${FRONTEND_PORT:-8080}:8080"   # G10.10 M8：非 root nginx 仅能监听非特权端口 8080
 
   backup:
     # S4：备份调度 sidecar——backend 镜像含 scripts，循环模式每 BACKUP_INTERVAL_HOURS
