@@ -24,8 +24,6 @@ Reference: §3.5
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from pathlib import Path
 
 import aiosqlite
@@ -120,16 +118,6 @@ _db_pool = SQLitePool(settings.DB_POOL_SIZE, settings.SQLITE_PATH)
 async def get_connection() -> aiosqlite.Connection:
     """获取数据库连接（从池 checkout；调用方负责 close_db 归还）。"""
     return await _db_pool.acquire()
-
-
-@asynccontextmanager
-async def connection_scope() -> AsyncIterator[aiosqlite.Connection]:
-    """上下文管理器：自动归还连接池，避免泄漏。"""
-    db = await get_connection()
-    try:
-        yield db
-    finally:
-        await close_db(db)
 
 
 async def close_db(db: aiosqlite.Connection | None) -> None:

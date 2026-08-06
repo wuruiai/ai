@@ -5,7 +5,7 @@
 Reference: §4.2
 """
 
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_openai import ChatOpenAI
 
 from backend.config import settings
 
@@ -27,7 +27,7 @@ class ModelFactory:
         return ChatOpenAI(
             model=model or settings.LLM_MODEL,
             api_key=settings.DASHSCOPE_API_KEY,
-            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            base_url=settings.DASHSCOPE_BASE_URL,
             temperature=temperature,
             timeout=settings.LLM_TIMEOUT_S,
             # 偶发限流/超时自动重试（指数退避最多 max_retries 次）
@@ -38,14 +38,7 @@ class ModelFactory:
             callbacks=callbacks or [],
         )
 
-    @staticmethod
-    def create_embedding():
-        """创建 Embedding 实例"""
-        return OpenAIEmbeddings(
-            model=settings.EMBEDDING_MODEL,
-            api_key=settings.DASHSCOPE_API_KEY,
-            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-        )
-
-    # Rerank 统一走 backend.rag.reranker.rerank()（DashScope 原生协议）
-    # 不在此重复实现，避免双入口。
+    # Embedding 统一走 backend.rag.embedding.get_embeddings()（openai SDK 直连，
+    # 绕开 langchain OpenAIEmbeddings 的 list 序列化 bug）。
+    # Rerank 统一走 backend.rag.reranker.rerank()（DashScope 原生协议）。
+    # 两者都不在此重复实现，避免双入口。
