@@ -1,10 +1,40 @@
+# 单一配置源（G8.1）
+#
+# 项目级工具链（ruff / pytest）统一收口到此文件，取代散落的 .ruff.toml / pytest.ini。
+# 依赖冻结仍以 requirements.lock.txt 为准（Docker / CI / README 安装指令不变）。
+#
+# 版本单一来源：backend/__init__.py 的 __version__（config.APP_VERSION 也读它），
+# [tool.setuptools.dynamic] 从这里派生，避免 pyproject / 运行时代码两处硬编码漂移。
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "water-rag-local"
+description = "水利行业 RAG + Agent 知识问答系统（FastAPI + LangGraph + Vue3）"
+readme = "README.md"
+requires-python = ">=3.11"
+dynamic = ["version"]
+classifiers = [
+    "Private :: Do Not Upload",
+]
+
+[tool.setuptools.packages.find]
+include = ["backend*", "scripts*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "backend.__version__" }
+
+# ---------------------------------------------------------------- ruff
 # Ruff lint / format 策略（CI 门禁据此执行）
 # 目标：Python 3.11 风格现代化 + 常见陷阱，同时把合法惯用法白名单化。
 
+[tool.ruff]
 target-version = "py311"
 line-length = 100
 
-[lint]
+[tool.ruff.lint]
 # 在默认 F/E/W 基础上扩展：modern 注解(UP)、import 排序(I)、bugbear(B)、
 # 安全(S)、时区(DTZ)、日志(G)、简化(PIE)、RUF 通用。
 select = ["E", "W", "F", "I", "UP", "B", "RUF", "S", "DTZ", "G", "PIE", "BLE"]
@@ -18,7 +48,7 @@ ignore = [
   "RUF003",  # 同上：中文注释全部命中
 ]
 
-[lint.per-file-ignores]
+[tool.ruff.lint.per-file-ignores]
 "tests/**" = [
   "S101",  # 测试用 assert 是标准做法（pytest 依赖 assert 收集失败信息）
   "S105",  # 测试里写硬编码测试密码是常规做法
@@ -32,7 +62,7 @@ ignore = [
   "RUF012",  # LangGraph 状态 schema（TypedDict）的字段默认值约定：missing 时按此补全，运行期深拷贝，非共享可变对象
 ]
 
-[lint.flake8-bugbear]
+[tool.ruff.lint.flake8-bugbear]
 # FastAPI 依赖注入惯用法：Depends()/Header()/Query() 等作为函数默认参数是合法模式
 extend-immutable-calls = [
   "fastapi.Depends",
@@ -42,4 +72,14 @@ extend-immutable-calls = [
   "fastapi.File",
   "fastapi.Form",
   "fastapi.Body",
+]
+
+# ---------------------------------------------------------------- pytest
+[tool.pytest.ini_options]
+testpaths = ["tests/unit"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-q"
+filterwarnings = [
+    "ignore::DeprecationWarning",
 ]
