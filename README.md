@@ -115,6 +115,29 @@ docker compose up -d --build
 > Docker 排障记录：若 `docker compose up` 卡住，多为 frontend 镜像 `npm ci`
 > 走官方源所致，本项目已内置 `frontend/.npmrc`（npmmirror）规避。详见 `docs/enterprise-optimization-plan.md`。
 
+### 备份与定时任务
+
+数据备份会自动校验（`PRAGMA integrity_check` + Chroma 非空）并按保留天数清理旧备份，默认保留 7 天：
+
+```bash
+# 手动备份（带备注）
+python -m scripts.backup_data --note pre-upgrade
+# 指定保留天数（默认取 settings.BACKUP_RETENTION_DAYS）
+python -m scripts.backup_data --retention-days 14
+```
+
+定时备份用 `scripts/backup_cron.py`，由 `BACKUP_ENABLED`（默认 true）控制开关：
+
+```bash
+# Windows 计划任务 / 系统 cron 每日触发一次
+python -m scripts.backup_cron --once
+# 常驻进程每 3 小时备份一次（docker sidecar / systemd / NSSM）
+python -m scripts.backup_cron --interval-hours 3
+```
+
+> Windows 计划任务示例：`schtasks /Create /SC DAILY /ST 02:00 /TN "water-rag-backup" /TR "cd /d <项目根目录> && .venv\Scripts\python -m scripts.backup_cron --once"`
+> Docker 定时备份：`docker run -d --name water-backup-cron -v water-data:/app/data <镜像> python -m scripts.backup_cron --interval-hours 3`
+
 ## 测试与 CI
 
 ```bash
