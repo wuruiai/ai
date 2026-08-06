@@ -369,6 +369,21 @@
 
 ---
 
+> **实施状态(2026-08-06)**:Phase 6 全部完成 —— G6.1 ✅ / G6.2 ✅ / G6.3 ✅
+> - G6.1：vitest/@vue/test-utils/jsdom/@vitest/coverage-v8 入 devDeps；scripts 加
+>   `test`/`test:watch`/`coverage`；vite.config.ts 加 `test` 块（jsdom）；`chat.ts` 导出
+>   `parseSseLine`/`parseSseBlock` 纯函数；首批 5 文件 21 用例（SSE 解析器 / auth store
+>   持久化与旧 token 迁移 / chat store 流式 mock / CitationPanel / LoginView）；CI frontend
+>   job 改为 type-check → test → build。实测 23 用例全绿、vue-tsc 通过、生产 build 通过。
+> - G6.2：删除死代码 `utils/sse.ts`；新增 `utils/token.ts` `getToken()` 统一从 auth store
+>   读（SSE 与 axios 同源）；`chat.ts` 改用 `getToken()` —— 修复直读旧 key `'token'`
+>   导致 SSE 无 Authorization 头必 401 的 bug；router 守卫改走 `getToken()`；生产代码
+>   `localStorage` 仅存于 auth store（单通道）。
+> - G6.3：新增 `ErrorBoundary.vue`（onErrorCaptured 渲染异常→降级卡片不白屏）与
+>   `BoundaryRouterView.vue`（ErrorBoundary + Suspense 懒加载骨架）；App.vue 两处路由出口
+>   统一使用；main.ts 补 `app.config.errorHandler` 兜底日志；ChatView sendMessage 补
+>   `.catch(extractError)` 防未处理 rejection；新增 ErrorBoundary 组件测试。
+
 ## Phase 6 — 前端工程化
 
 ### G6.1 Vitest 单元/组件测试 + CI 接入
