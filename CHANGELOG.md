@@ -8,6 +8,10 @@
 
 ### Fixed
 
+- **前端 SSE 健壮性（G10.3）**：流式 POST 遇到 401 时经 auth store 单飞 refresh 换新
+  token 自动重放一次（此前裸 fetch 不走 axios 拦截器，30 分钟会话中途流式被 401 打断）；
+  流式中断（网络抖动）在「未产出任何内容」时指数退避自动重连、复用同一助手消息，
+  已产出内容或服务端错误不重试，避免半截回答拼接错乱。
 - **CI 镜像构建闭环（G10.2）**：新增 `build-images` CI job，构建 backend/frontend 镜像
   并打版本 + 短 sha 不可变 tag；master + 配置 `GHCR_PAT` secret 时推送 GHCR，未配置时
   退化为「镜像能构建」验证——补齐生产 compose「CI 负责构建并推送镜像」此前缺失的环节。

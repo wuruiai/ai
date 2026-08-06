@@ -18,6 +18,7 @@
  */
 
 import { getToken } from '@/utils/token'
+import { useAuthStore } from '@/stores/auth'
 
 export interface StartEvent {
   thread_id: string
@@ -115,21 +116,43 @@ export function parseSseBlock(block: string): { event: string; data: unknown } |
   return { event, data }
 }
 
+/** POST 流式接口（带当前 access token）。单独抽出便于 401 刷新后重放。 */
+async function _postStream(
+  query: string,
+  threadId: string,
+  token: string | null,
+  signal?: AbortSignal
+): Promise<Response> {
+  return fetch('/api/v1/chat/stream', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ query, thread_id: threadId }),
+    signal,
+  })
+}
+
 export async function streamChat(opts: StreamChatOptions): Promise<void> {
   const { query, threadId, signal } = opts
 
+  let token = getToken()
   let response: Response
   try {
-    const token = getToken()
-    response = await fetch('/api/v1/chat/stream', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({ query, thread_id: threadId }),
-      signal,
-    })
+    response = await _postStream(query, threadId, token, signal)
+    // S3：裸 fetch 不走 axios 拦截器——access token 过期(401)时经 auth store
+    // 单飞 refresh 换新后重放一次，避免 30 分钟会话中途流式被 401 打断。
+    // refresh 失败（refresh 过期/吊销/离线）保留原 401 响应，走下方 http_401 分支。
+    if (response.status === 401 && token) {
+      const authStore = useAuthStore()
+      try {
+        token = await authStore.refresh()
+        response = await _postStream(query, threadId, token, signal)
+      } catch {
+        // 原 401 响应保留在 response，交给统一错误处理
+      }
+    }
   } catch (err) {
     opts.onError({ code: 'network_error', message: (err as Error).message })
     return

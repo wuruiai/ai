@@ -84,4 +84,60 @@ describe('chat store sendMessage', () => {
     expect(store.messages).toHaveLength(0)
     expect(mockedStreamChat).not.toHaveBeenCalled()
   })
+
+  it('S3：网络错误且未产出内容时自动重连，复用同一 assistant 消息', async () => {
+    mockedStreamChat
+      .mockImplementationOnce(async (opts: { onError: (e: ErrorEvent) => void }) => {
+        opts.onError({ code: 'network_error', message: 'ECONNRESET' })
+      })
+      .mockImplementationOnce(async (opts: {
+        onToken: (e: TokenEvent) => void
+        onDone: (e: DoneEvent) => void
+      }) => {
+        opts.onToken({ delta: '好' })
+        opts.onDone({ message_id: 'm2' })
+      })
+
+    const store = useChatStore()
+    await store.sendMessage('q')
+
+    expect(mockedStreamChat).toHaveBeenCalledTimes(2)
+    // 同一 assistant 消息内完成拼接，不新增第二条助手消息
+    expect(store.messages).toHaveLength(2)
+    expect(store.messages[1].content).toBe('好')
+    expect(store.messages[1].messageId).toBe('m2')
+    expect(store.error).toBeNull()
+  })
+
+  it('S3：已产出内容后流中断不重连，保留已完成部分', async () => {
+    mockedStreamChat.mockImplementation(async (opts: {
+      onToken: (e: TokenEvent) => void
+      onError: (e: ErrorEvent) => void
+    }) => {
+      opts.onToken({ delta: '半截' })
+      opts.onError({ code: 'stream_error', message: 'connection lost' })
+    })
+
+    const store = useChatStore()
+    await store.sendMessage('q')
+
+    expect(mockedStreamChat).toHaveBeenCalledTimes(1)
+    // 已产出内容：不重连（避免半截拼接错乱），保留已生成部分
+    expect(store.messages[1].content).toBe('半截')
+  })
+
+  it('S3：服务端错误（http_500）不重连', async () => {
+    mockedStreamChat.mockImplementation(async (opts: {
+      onError: (e: ErrorEvent) => void
+    }) => {
+      opts.onError({ code: 'http_500', message: '服务器错误' })
+    })
+
+    const store = useChatStore()
+    await store.sendMessage('q')
+
+    expect(mockedStreamChat).toHaveBeenCalledTimes(1)
+    expect(store.error).toBe('服务器错误')
+    expect(store.messages[1].content).toBe('（错误：服务器错误）')
+  })
 })

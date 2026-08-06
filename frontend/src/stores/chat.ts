@@ -15,6 +15,12 @@ interface Message {
   timestamp: Date
 }
 
+/** SSE 错误事件的最小结构（用于重连判定与最终展示） */
+interface StreamError {
+  code: string
+  message: string
+}
+
 let _idCounter = 0
 function nextId(): string {
   _idCounter += 1
@@ -97,6 +103,12 @@ export const useChatStore = defineStore('chat', () => {
   const lastQuery = ref('')
   let activeController: AbortController | null = null
 
+  // S3：流式中断自动重连——网络抖动/流中断在「未收到任何内容」时最多补试 2 次
+  //（指数退避）。已产出内容不重连（避免半截回答拼接错乱）；用户停止/服务端
+  // 错误（http_4xx/5xx、error 事件）不重试。
+  const MAX_STREAM_ATTEMPTS = 3
+  const RETRY_BACKOFF_MS = [1000, 3000]
+
   /** 发一条用户消息并流式消费 SSE 回答。 */
   async function sendMessage(query: string) {
     if (!query.trim() || isLoading.value) return
@@ -126,54 +138,89 @@ export const useChatStore = defineStore('chat', () => {
     const controller = new AbortController()
     activeController = controller
 
+    let finalError: StreamError | null = null
+    let attempt = 0
     try {
-      await streamChat({
-        query: query.trim(),
-        threadId: threadId.value,
-        signal: controller.signal,
-        onToken: ({ delta }) => {
-          const m = messages.value.find((x) => x.id === assistantId)
-          if (m) m.content += delta
-        },
-        onCitation: (citation) => {
-          const m = messages.value.find((x) => x.id === assistantId)
-          if (m) m.citations = [...(m.citations ?? []), citation]
-        },
-        onCitationVerdict: (e) => {
-          // 答案生成后按 index 回填 verified，即时刷新当前会话的引用面板（G3.2）
-          const m = messages.value.find((x) => x.id === assistantId)
-          if (!m || !m.citations) return
-          for (const item of e.items) {
-            const c = m.citations[item.index - 1]
-            if (c) c.verified = item.verified
-          }
-        },
-        onDone: (e) => {
-          const m = messages.value.find((x) => x.id === assistantId)
-          if (m && e.message_id) m.messageId = e.message_id
-        },
-        onWarning: (e) => {
-          const m = messages.value.find((x) => x.id === assistantId)
-          if (m && e.message) m.warning = e.message
-        },
-        onError: (e) => {
-          // 用户主动停止：不当作错误展示
-          if (e.code === 'aborted') {
+      while (attempt < MAX_STREAM_ATTEMPTS) {
+        attempt += 1
+        // 每轮独立承载错误。用类型断言初始化而非字面量 null：TS 不追踪闭包内
+        // 赋值，字面量 null 会被收窄并让循环内后续访问误判 never/不可达；
+        // 断言保留联合类型，`=== null` 判定才能正确收窄。
+        let attemptError: StreamError | null = null as StreamError | null
+        let receivedToken = false
+        let receivedDone = false
+
+        await streamChat({
+          query: query.trim(),
+          threadId: threadId.value,
+          signal: controller.signal,
+          onToken: ({ delta }) => {
+            receivedToken = true
             const m = messages.value.find((x) => x.id === assistantId)
-            if (m && !m.content) m.content = '（已停止生成）'
-            return
-          }
-          error.value = e.message || '请求失败'
-          const m = messages.value.find((x) => x.id === assistantId)
-          if (m && !m.content) m.content = `（错误：${e.message || '请求失败'}）`
-        },
-      })
-      // 发送成功后刷新会话列表（新会话会出现在顶部）
-      await loadThreads()
+            if (m) m.content += delta
+          },
+          onCitation: (citation) => {
+            const m = messages.value.find((x) => x.id === assistantId)
+            if (m) m.citations = [...(m.citations ?? []), citation]
+          },
+          onCitationVerdict: (e) => {
+            // 答案生成后按 index 回填 verified，即时刷新当前会话的引用面板（G3.2）
+            const m = messages.value.find((x) => x.id === assistantId)
+            if (!m || !m.citations) return
+            for (const item of e.items) {
+              const c = m.citations[item.index - 1]
+              if (c) c.verified = item.verified
+            }
+          },
+          onDone: (e) => {
+            receivedDone = true
+            const m = messages.value.find((x) => x.id === assistantId)
+            if (m && e.message_id) m.messageId = e.message_id
+          },
+          onWarning: (e) => {
+            const m = messages.value.find((x) => x.id === assistantId)
+            if (m && e.message) m.warning = e.message
+          },
+          onError: (e) => {
+            attemptError = e
+          },
+        })
+
+        // 已正常结束（done / 无错误静默关闭）→ 不再重试
+        if (receivedDone || attemptError === null) break
+        const retryable =
+          !receivedToken &&
+          attemptError.code !== 'aborted' &&
+          !/^http_[45]\d\d$/.test(attemptError.code) &&
+          attemptError.code !== 'error'
+        if (!retryable || attempt >= MAX_STREAM_ATTEMPTS) {
+          finalError = attemptError
+          break
+        }
+
+        // 指数退避后重连：复用同一 assistant 消息继续追加，不新增消息
+        await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS[attempt - 1]))
+      }
     } finally {
       isLoading.value = false
       activeController = null
     }
+
+    // 最终失败展示（重连成功/正常结束则 finalError 为 null）
+    if (finalError) {
+      if (finalError.code === 'aborted') {
+        // 用户主动停止：不当作错误展示
+        const m = messages.value.find((x) => x.id === assistantId)
+        if (m && !m.content) m.content = '（已停止生成）'
+      } else {
+        error.value = finalError.message || '请求失败'
+        const m = messages.value.find((x) => x.id === assistantId)
+        if (m && !m.content) m.content = `（错误：${finalError.message || '请求失败'}）`
+      }
+    }
+
+    // 发送后刷新会话列表（新会话会出现在顶部）
+    await loadThreads()
   }
 
   /** 停止当前生成 */
