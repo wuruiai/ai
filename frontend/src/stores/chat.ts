@@ -139,6 +139,15 @@ export const useChatStore = defineStore('chat', () => {
           const m = messages.value.find((x) => x.id === assistantId)
           if (m) m.citations = [...(m.citations ?? []), citation]
         },
+        onCitationVerdict: (e) => {
+          // 答案生成后按 index 回填 verified，即时刷新当前会话的引用面板（G3.2）
+          const m = messages.value.find((x) => x.id === assistantId)
+          if (!m || !m.citations) return
+          for (const item of e.items) {
+            const c = m.citations[item.index - 1]
+            if (c) c.verified = item.verified
+          }
+        },
         onDone: (e) => {
           const m = messages.value.find((x) => x.id === assistantId)
           if (m && e.message_id) m.messageId = e.message_id

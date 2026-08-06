@@ -9,7 +9,11 @@
       >
         <span class="citation-index">[{{ index + 1 }}]</span>
         <div class="citation-body">
-          <div class="citation-source">{{ citation.source_name || '未知来源' }}</div>
+          <div class="citation-source">
+            {{ citation.source_name || '未知来源' }}
+            <span v-if="citation.verified === true" class="badge verified">已核实</span>
+            <span v-else-if="citation.verified === false" class="badge pending">待核实</span>
+          </div>
           <div v-if="citation.content" class="citation-snippet">{{ citation.content }}</div>
         </div>
       </div>
@@ -23,6 +27,8 @@ defineProps<{
     source_name?: string
     page?: number | null
     content?: string
+    /** G3.2：后端引用核实结果；undefined=未判定（流式展示阶段） */
+    verified?: boolean
   }>
 }>()
 </script>
@@ -70,6 +76,28 @@ defineProps<{
 .citation-source {
   font-weight: 500;
   color: #455a64;
+}
+
+.badge {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.5;
+  vertical-align: 0.05em;
+}
+
+.badge.verified {
+  color: #1b873f;
+  background: #e7f7ec;
+  border: 1px solid #b7e0c4;
+}
+
+.badge.pending {
+  color: #b45309;
+  background: #fef3c7;
+  border: 1px solid #f5d78e;
 }
 
 .citation-snippet {

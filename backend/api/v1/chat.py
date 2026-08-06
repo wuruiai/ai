@@ -9,6 +9,7 @@ Reference: §9.7
     event: status     data: { phase: <str> }
     event: token      data: { delta: <str> }    （按字符切片，伪流式）
     event: citation   data: { index, source_id, source_name, page, content }
+    event: citation_verdict  data: { items: [{index, verified}] }   （G3.2 答案生成后回传核实结果）
     event: done       data: { message_id }
     event: error      data: { code, message }
 """
@@ -33,6 +34,7 @@ from backend.core.rate_limit import check_rate_limit
 from backend.core.risk import high_risk_warning, is_high_risk
 from backend.core.sse import (
     create_citation_event,
+    create_citation_verdict_event,
     create_done_event,
     create_error_event,
     create_start_event,
@@ -41,6 +43,7 @@ from backend.core.sse import (
     create_warning_event,
 )
 from backend.db.connection import close_db, get_connection
+from backend.rag.citation import citation_checker
 from backend.rag.retriever import retrieve as hybrid_retrieve
 
 logger = get_logger(__name__)
@@ -306,6 +309,14 @@ async def chat_stream(
 
         # 真流式：token 已在上方循环逐条推送；此处取完整答案用于落库
         answer = response.content or ""
+
+        # G3.2 引用核实：答案生成后对已展示的引用做词汇覆盖校验（防幻觉信号）
+        #   - 落库的 citations 带 verified 标记，历史回放时前端可直接展示
+        #   - 额外推送 citation_verdict 事件，让当前会话的引用面板即时更新
+        citations = citation_checker.verify_citation(answer, citations)
+        yield create_citation_verdict_event(
+            [{"index": c["index"], "verified": c["verified"]} for c in citations]
+        ).format()
 
         # 6.5 高风险提示：问题涉及防汛调度/工程安全/法规合规时附人工复核提醒
         if is_high_risk(query):

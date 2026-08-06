@@ -40,6 +40,10 @@ export interface CitationEvent {
   [k: string]: unknown
 }
 
+export interface CitationVerdictEvent {
+  items: Array<{ index: number; verified: boolean }>
+}
+
 export interface DoneEvent {
   message_id: string
 }
@@ -60,6 +64,7 @@ export interface StreamChatOptions {
   onStatus?: (e: StatusEvent) => void
   onToken: (e: TokenEvent) => void
   onCitation: (e: CitationEvent) => void
+  onCitationVerdict?: (e: CitationVerdictEvent) => void
   onDone: (e: DoneEvent) => void
   onError: (e: ErrorEvent) => void
   onWarning?: (e: WarningEvent) => void
@@ -182,7 +187,8 @@ function dispatchEvent(
   opts: StreamChatOptions
 ): void {
   const { event, data } = evt
-  const { onStart, onStatus, onToken, onCitation, onDone, onError, onWarning } = opts
+  const { onStart, onStatus, onToken, onCitation, onCitationVerdict, onDone, onError, onWarning } =
+    opts
   switch (event) {
     case 'start':
       onStart?.(data as StartEvent)
@@ -195,6 +201,9 @@ function dispatchEvent(
       break
     case 'citation':
       onCitation(data as CitationEvent)
+      break
+    case 'citation_verdict':
+      onCitationVerdict?.(data as CitationVerdictEvent)
       break
     case 'done':
       onDone(data as DoneEvent)

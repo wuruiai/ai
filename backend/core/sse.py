@@ -50,6 +50,14 @@ def create_citation_event(citation: dict) -> SSEEvent:
     return SSEEvent(event="citation", data=citation)
 
 
+def create_citation_verdict_event(items: list[dict]) -> SSEEvent:
+    """创建引用核实结果事件（G3.2）：答案生成后对每条引用回传 verified 判定。
+
+    data.items: [{"index": int, "verified": bool}, ...]
+    """
+    return SSEEvent(event="citation_verdict", data={"items": items})
+
+
 def create_done_event(message_id: str) -> SSEEvent:
     """创建完成事件"""
     return SSEEvent(event="done", data={"message_id": message_id})
