@@ -299,8 +299,9 @@ async def _chat_stream(query: str, thread_id: str, user: CurrentUser) -> AsyncIt
         if not task.done():
             task.cancel()
         await asyncio.gather(task, return_exceptions=True)
-    # 完成一次 orchestrator 调用即计入当日额度（每用户）
-    budget_manager.record_call(user.user_id, settings.LLM_MODEL)
+        # G10.7 M18：失败路径也记账——崩溃/异常同样消耗了 LLM 调用，
+        # 若只在成功路径 record，攻击者可借持续触发错误绕过每日预算上限
+        budget_manager.record_call(user.user_id, settings.LLM_MODEL)
     # G3.1: token 用量落库（flush 内部已兜底，失败不影响回复）
     await usage_collector.flush(user.user_id, agent_type="knowledge_qa")
 

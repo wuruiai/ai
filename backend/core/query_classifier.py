@@ -34,12 +34,14 @@ class QueryClassifier:
             cls._instance = cls()
         return cls._instance
 
-    async def classify(self, query: str) -> tuple[QueryType, float]:
+    async def classify(self, query: str, callbacks: list | None = None) -> tuple[QueryType, float]:
         """
         分类查询类型。
 
         Args:
             query: 用户查询
+            callbacks: 用量回调（G10.7 M1）——经 Agent 链路调用时传入
+                llm_callbacks，使辅助 LLM 的 token 用量也计入 llm_usage
 
         Returns:
             (query_type, confidence)
@@ -55,7 +57,13 @@ class QueryClassifier:
 请只返回一个 JSON：{{"type": "general 或 specialized", "confidence": 0.0-1.0}}"""
 
         try:
-            response = await self._llm.ainvoke(prompt)
+            # 无回调走单例 LLM；带回调时新建绑定了用量链的实例（回调逐请求不同，不能缓存）
+            llm = (
+                self._llm
+                if callbacks is None
+                else ModelFactory.create_llm(temperature=0, callbacks=callbacks)
+            )
+            response = await llm.ainvoke(prompt)
             content = response.content.strip()
 
             # 解析 JSON

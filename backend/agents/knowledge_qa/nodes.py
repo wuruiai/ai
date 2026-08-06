@@ -30,9 +30,9 @@ async def classify_query_node(state: KnowledgeQAState) -> dict[str, Any]:
     last_message = messages[-1]
     query = last_message.content if hasattr(last_message, "content") else str(last_message)
 
-    # 使用查询分类器
+    # 使用查询分类器（G10.7 M1：带用量回调，辅助 LLM 的 token 也计入 llm_usage）
     classifier = get_query_classifier()
-    query_type, _ = await classifier.classify(query)
+    query_type, _ = await classifier.classify(query, callbacks=state.get("llm_callbacks"))
 
     # 分类器返回 GENERAL / SPECIALIZED，需映射到 graph 路由能识别的类型：
     #   SPECIALIZED（专业问题）→ PRECISE（走 RAG 检索）
@@ -54,7 +54,7 @@ async def hyde_generate_node(state: KnowledgeQAState) -> dict[str, Any]:
     query = state.get("original_query", "")
 
     hyde_gen = get_hyde_generator()
-    hypothetical_doc = await hyde_gen.generate(query)
+    hypothetical_doc = await hyde_gen.generate(query, callbacks=state.get("llm_callbacks"))
 
     return {
         "hypothetical_doc": hypothetical_doc,
@@ -68,7 +68,7 @@ async def multi_query_rewrite_node(state: KnowledgeQAState) -> dict[str, Any]:
     query = state.get("original_query", "")
 
     rewriter = get_multi_query_rewriter()
-    queries = await rewriter.rewrite(query)
+    queries = await rewriter.rewrite(query, callbacks=state.get("llm_callbacks"))
 
     return {
         "queries": queries,

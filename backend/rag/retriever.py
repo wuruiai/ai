@@ -39,6 +39,31 @@ def _normalize(scores: list[float]) -> list[float]:
     return [(s - lo) / (hi - lo) for s in scores]
 
 
+async def _disabled_document_ids(user_id: str | None) -> set[str]:
+    """一次性取禁用文档集合（documents.is_enabled=0）。
+
+    检索前过滤，使 PATCH 切到 is_enabled=0 的文档立即从 RAG 结果消失——
+    否则该开关对检索无任何效果（G10.7 M17 死功能）。查询失败按空集降级，
+    不阻断检索（与 dense/sparse 各段的降级语义一致）。
+    """
+    from backend.db.connection import close_db, get_connection
+
+    db = await get_connection()
+    try:
+        if user_id:
+            async with db.execute(
+                "SELECT document_id FROM documents WHERE user_id=? AND is_enabled=0",
+                (user_id,),
+            ) as cur:
+                return {row[0] for row in await cur.fetchall()}
+        async with db.execute("SELECT document_id FROM documents WHERE is_enabled=0") as cur:
+            return {row[0] for row in await cur.fetchall()}
+    except Exception:  # noqa: BLE001 -- 表缺失/查询异常按空集降级
+        return set()
+    finally:
+        await close_db(db)
+
+
 async def retrieve(
     query: str,
     top_k: int | None = None,
@@ -118,6 +143,14 @@ async def retrieve(
             )
     except Exception:  # noqa: BLE001 -- FTS 空表/无命中时不阻断 dense（有意降级）
         sparse_results = []
+
+    # ---------- 禁用文档过滤（G10.7 M17） ----------
+    # documents.is_enabled=0 的文档不参与检索（PATCH 关闭立即生效）。
+    # dense/sparse 都按 document_id 排除；过滤后为空则自然返回空结果。
+    disabled_ids = await _disabled_document_ids(user_id)
+    if disabled_ids:
+        dense_results = [r for r in dense_results if r["document_id"] not in disabled_ids]
+        sparse_results = [r for r in sparse_results if r["document_id"] not in disabled_ids]
 
     # ---------- 归一化 ----------
     dense_vals = [r["raw"] for r in dense_results]  # cosine 距离，越小越好

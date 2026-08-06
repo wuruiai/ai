@@ -17,13 +17,17 @@ class MultiQueryRewriter:
     def __init__(self):
         self._llm = ModelFactory.create_llm(temperature=0.7)
 
-    async def rewrite(self, query: str, num_queries: int | None = None) -> list[str]:
+    async def rewrite(
+        self, query: str, num_queries: int | None = None, callbacks: list | None = None
+    ) -> list[str]:
         """
         将查询改写成多个角度。
 
         Args:
             query: 原始查询
             num_queries: 生成的查询数量（默认从配置读取）
+            callbacks: 用量回调（G10.7 M1）——经 Agent 链路调用时传入
+                llm_callbacks，使辅助 LLM 的 token 用量也计入 llm_usage
 
         Returns:
             改写后的查询列表（包含原始查询）
@@ -42,7 +46,13 @@ class MultiQueryRewriter:
         )
 
         try:
-            response = await self._llm.ainvoke(prompt)
+            # 无回调走单例 LLM；带回调时新建绑定了用量链的实例（回调逐请求不同，不能缓存）
+            llm = (
+                self._llm
+                if callbacks is None
+                else ModelFactory.create_llm(temperature=0.7, callbacks=callbacks)
+            )
+            response = await llm.ainvoke(prompt)
             content = response.content.strip()
 
             # 解析生成的查询

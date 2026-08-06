@@ -16,7 +16,7 @@ class HyDEGenerator:
     def __init__(self):
         self._llm = ModelFactory.create_llm(temperature=0.7)
 
-    async def generate(self, query: str) -> str:
+    async def generate(self, query: str, callbacks: list | None = None) -> str:
         """
         生成假设性文档。
 
@@ -25,6 +25,8 @@ class HyDEGenerator:
 
         Args:
             query: 用户查询（通常是模糊的）
+            callbacks: 用量回调（G10.7 M1）——经 Agent 链路调用时传入
+                llm_callbacks，使辅助 LLM 的 token 用量也计入 llm_usage
 
         Returns:
             假设性文档文本
@@ -37,7 +39,13 @@ class HyDEGenerator:
 请生成一段 200-300 字的假设性答案："""
 
         try:
-            response = await self._llm.ainvoke(prompt)
+            # 无回调走单例 LLM；带回调时新建绑定了用量链的实例（回调逐请求不同，不能缓存）
+            llm = (
+                self._llm
+                if callbacks is None
+                else ModelFactory.create_llm(temperature=0.7, callbacks=callbacks)
+            )
+            response = await llm.ainvoke(prompt)
             hypothetical_doc = response.content.strip()
             logger.info("HyDE generated: %d chars", len(hypothetical_doc))
             return hypothetical_doc

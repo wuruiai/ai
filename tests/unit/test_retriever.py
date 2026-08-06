@@ -83,3 +83,69 @@ async def test_retrieve_dense_failure_degrades_to_sparse(monkeypatch):
     res = await retrieve("q", top_k=5, user_id="u1")
     assert len(res) == 1
     assert res[0].source == "sparse"
+
+
+async def test_retrieve_excludes_disabled_documents(monkeypatch):
+    """G10.7 M17：is_enabled=0 的文档不参与检索（禁用开关对检索真实生效）。"""
+    from backend.rag import retriever as r
+
+    async def fake_embedding(_q):
+        return [0.1] * 8
+
+    async def fake_disabled(_user_id):
+        return {"d_disabled"}
+
+    class FakeVS:
+        async def query(self, query_embedding, n_results, where):
+            return {
+                "ids": [["c1", "c2"]],
+                "documents": [["内容A", "内容B"]],
+                "metadatas": [[{"document_id": "d_disabled"}, {"document_id": "d_ok"}]],
+                "distances": [[0.1, 0.2]],
+            }
+
+    class FakeBM25:
+        async def search(self, query, top_k, document_id, user_id):
+            return [
+                {
+                    "chunk_id": "c3",
+                    "document_id": "d_disabled",
+                    "content": "稀疏禁用",
+                    "score": 1.0,
+                }
+            ]
+
+    monkeypatch.setattr(r, "get_embedding", fake_embedding)
+    monkeypatch.setattr(r, "_disabled_document_ids", fake_disabled)
+    monkeypatch.setattr(r, "vector_store", FakeVS())
+    monkeypatch.setattr(r, "bm25_store", FakeBM25())
+
+    res = await retrieve("q", top_k=5, user_id="u1")
+    # 禁用文档（d_disabled）的 chunk 无论 dense/sparse 都被过滤
+    assert [x.chunk_id for x in res] == ["c2"]
+
+
+async def test_disabled_document_ids_sql():
+    """G10.7 M17：禁用集合 SQL 与真实列名（user_id / is_enabled）匹配，支持全局/按用户。"""
+    from backend.db.connection import close_db, get_connection
+    from backend.rag.retriever import _disabled_document_ids
+
+    db = await get_connection()
+    try:
+        await db.execute(
+            "CREATE TABLE documents ("
+            "document_id TEXT PRIMARY KEY, user_id TEXT, "
+            "is_enabled INTEGER NOT NULL DEFAULT 1)"
+        )
+        await db.execute(
+            "INSERT INTO documents (document_id, user_id, is_enabled) VALUES "
+            "('d_off', 'u1', 0), ('d_on', 'u1', 1), ('d_off2', 'u2', 0)"
+        )
+        await db.commit()
+    finally:
+        await close_db(db)
+
+    assert await _disabled_document_ids("u1") == {"d_off"}
+    assert await _disabled_document_ids("u2") == {"d_off2"}
+    # 全局（管理员检索）排除所有用户的禁用文档
+    assert await _disabled_document_ids(None) == {"d_off", "d_off2"}

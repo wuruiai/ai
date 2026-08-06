@@ -38,6 +38,12 @@
 
 ### Security
 
+- **成本记账补全 + 失败路径对齐 + 禁用文档生效（G10.7）**：① 检索链路上的辅助 LLM
+  （查询分类器 / HyDE / 多查询改写）接入 `llm_callbacks` 用量链——此前这三类调用创建 LLM
+  时不带回调，token 消耗是 llm_usage 的成本黑洞；② 预算 `record_call` 移入流式端点
+  finally（成功/崩溃/客户端断开统一收口），失败路径不再绕过每日预算上限；③ `is_enabled`
+  从"死功能"变为真实生效——检索前过滤禁用文档集合，PATCH 关闭的文档立即从 dense/sparse
+  结果消失（含管理员全局检索），切换可逆无需重新索引。6 个回归测试。
 - **异常信息脱敏（G10.6）**：orchestrator 崩溃/Agent 链路未预期异常不再把 `str(e)`（路径、
   连接串、供应商错误原文等内部细节）透传给客户端——SSE `error` 事件与非流式响应统一收敛为
   稳定错误码 `ORCHESTRATOR_ERROR` + 通用文案，真实异常由服务端 `logger.exception` 记录。

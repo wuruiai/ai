@@ -125,3 +125,29 @@ def test_unified_chat_stream_crash_redacts(monkeypatch):
         assert "SECRET_INTERNAL_DETAILS" not in text
         assert ERROR_CODE_ORCHESTRATOR in text
         assert GENERIC_ERROR_MESSAGE in text
+
+
+def test_unified_chat_stream_crash_records_budget(monkeypatch):
+    """G10.7 M18：崩溃路径也记账——每日预算不能被持续触发错误绕过。
+
+    记账在 finally（成功/失败/断开统一收口），崩溃返回后 record_call 必须已调用。
+    """
+    from backend.core.budget import budget_manager
+
+    recorded: list = []
+    monkeypatch.setattr(uc, "get_orchestrator", lambda: _CrashOrch())
+    monkeypatch.setattr(
+        budget_manager, "record_call", lambda user_id, model: recorded.append(user_id)
+    )
+    with TestClient(app) as c:
+        r = c.post(
+            "/api/v1/auth/register", json={"username": "budget_user", "password": "pass123456"}
+        )
+        h = {"Authorization": f"Bearer {r.json()['token']}"}
+        r = c.post(
+            "/api/v1/unified-chat/stream",
+            json={"message": "水利工程是什么", "session_id": "s_budget"},
+            headers=h,
+        )
+        assert r.status_code == 200
+    assert recorded, "崩溃路径也应调用 budget_manager.record_call"

@@ -191,11 +191,10 @@ async def unified_chat_stream(
             if not task.done():
                 task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+            # G10.7 M18：失败路径也记账（同 chat.py——崩溃/断开都消耗了 LLM 调用）
+            budget_manager.record_call(user.user_id, settings.LLM_MODEL)
             # G3.1：token 用量落库（flush 内部兜底，失败/异常不影响回复）
             await usage_collector.flush(user.user_id, agent_type=request.agent_type)
-
-        # 完成一次 orchestrator 调用即计入当日额度（每用户）
-        budget_manager.record_call(user.user_id, settings.LLM_MODEL)
 
         if not response.success:
             yield create_error_event(response.error_msg or "AGENT_ERROR", "agent failed").format()
