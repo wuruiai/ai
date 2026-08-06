@@ -19,7 +19,7 @@ async def rerank(
 
     async with create_http_client() as client:
         response = await client.post(
-            "https://dashscope.aliyuncs.com/api/v1/services/reranking/text-reranking/text-reranking",
+            settings.DASHSCOPE_RERANK_URL,
             headers={
                 "Authorization": f"Bearer {settings.DASHSCOPE_API_KEY}",
                 "Content-Type": "application/json",

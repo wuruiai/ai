@@ -12,6 +12,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Response, status
 from fastapi.responses import JSONResponse
 
+from backend.config import settings
 from backend.core.metrics import render_metrics
 from backend.db.migrations import SCHEMA_VERSION
 
@@ -48,7 +49,7 @@ async def health_check():
     """存活探针：进程在即 200（不含依赖检查，保持零成本、可高频探测）。"""
     return {
         "status": "ok",
-        "version": "1.0.0",
+        "version": settings.APP_VERSION,
         "schema_version": SCHEMA_VERSION,
     }
 
@@ -62,7 +63,7 @@ async def health_ready():
         status_code=status.HTTP_200_OK if ready else status.HTTP_503_SERVICE_UNAVAILABLE,
         content={
             "status": "ready" if ready else "not_ready",
-            "version": "1.0.0",
+            "version": settings.APP_VERSION,
             "schema_version": SCHEMA_VERSION,
             "checks": checks,
         },

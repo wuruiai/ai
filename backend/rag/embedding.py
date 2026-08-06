@@ -23,7 +23,7 @@ def _get_client() -> AsyncOpenAI:
     if _client is None:
         _client = AsyncOpenAI(
             api_key=settings.DASHSCOPE_API_KEY,
-            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            base_url=settings.DASHSCOPE_BASE_URL,
             # 偶发限流/超时自动重试（方案文档 §4.4）
             max_retries=max(2, settings.MAX_RETRIES),
             timeout=settings.LLM_TIMEOUT_S,

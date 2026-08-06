@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     APP_ENV: str = "local"
     APP_HOST: str = "127.0.0.1"
     APP_PORT: int = 8001
+    # 应用版本（G7.2 收口）：health 探针 / OpenAPI 统一从这里读，避免硬编码漂移
+    APP_VERSION: str = "1.0.0"
     # token 签名 secret：生产必须设置（ensure_secrets 强制），
     # 留空且非生产时进程级随机（重启后旧 token 失效，仅限开发）
     TOKEN_SECRET: str = ""
@@ -72,6 +74,12 @@ class Settings(BaseSettings):
 
     # DashScope 云服务
     DASHSCOPE_API_KEY: str = ""
+    # 兼容 OpenAI 协议端点（LLM / Embedding 统一走这里；G7.2 收口避免硬编码）
+    DASHSCOPE_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    # DashScope 原生 Rerank 端点（与 base_url 协议不同，单独配置）
+    DASHSCOPE_RERANK_URL: str = (
+        "https://dashscope.aliyuncs.com/api/v1/services/reranking/text-reranking/text-reranking"
+    )
     LLM_MODEL: str = "qwen-plus"
     LLM_MODEL_HARD: str = "qwen-max"
     EMBEDDING_MODEL: str = "text-embedding-v3"
