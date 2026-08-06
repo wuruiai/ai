@@ -93,8 +93,8 @@ def test_render_report_aggregates():
 
 
 def test_eval_set_is_valid_jsonl():
-    """docs/eval_set.jsonl 每行都是合法 JSON，且含 required 字段。"""
-    p = Path(__file__).resolve().parents[2] / "docs" / "eval_set.jsonl"
+    """tests/evaluation/eval_set.jsonl 每行都是合法 JSON，且含 required 字段。"""
+    p = Path(__file__).resolve().parents[2] / "tests" / "evaluation" / "eval_set.jsonl"
     items = evaluate_rag.load_eval_set(p)
     assert len(items) >= 5, "评测集至少 5 条"
     for it in items:

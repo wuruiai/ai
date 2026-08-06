@@ -1,10 +1,10 @@
 """RAG 检索质量评测（G3.4）
 
-对 `docs/eval_set.jsonl` 中每条问题跑统一混合检索（**不调用 LLM**，只跑检索），
+对 `tests/evaluation/eval_set.jsonl` 中每条问题跑统一混合检索（**不调用 LLM**，只跑检索），
 计算 recall@k / hit_rate@k / MRR@k，输出 Markdown 报告并固化基线。
 
 Usage:
-    python -m scripts.evaluate_rag   # 默认 docs/eval_set.jsonl → docs/rag-eval-report.md
+    python -m scripts.evaluate_rag   # 默认 tests/evaluation/eval_set.jsonl → 同目录报告
     python -m scripts.evaluate_rag --k 3 --k 5        # 自定义 top-k（默认 3,5,10）
     python -m scripts.evaluate_rag --user-id alice    # 限定用户数据（默认全量检索）
 
@@ -29,8 +29,8 @@ sys.path.insert(0, str(ROOT))
 from backend.db.connection import close_db, get_connection  # noqa: E402
 from backend.rag.retriever import retrieve  # noqa: E402
 
-DEFAULT_EVAL_SET = ROOT / "docs" / "eval_set.jsonl"
-DEFAULT_REPORT = ROOT / "docs" / "rag-eval-report.md"
+DEFAULT_EVAL_SET = ROOT / "tests" / "evaluation" / "eval_set.jsonl"
+DEFAULT_REPORT = ROOT / "tests" / "evaluation" / "rag-eval-report.md"
 
 
 def load_eval_set(path: Path) -> list[dict]:

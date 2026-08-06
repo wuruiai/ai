@@ -136,7 +136,7 @@ docker compose -f docker-compose.prod.yml up -d
 密钥经宿主环境变量 / `.env.production` 注入（该文件已被 `.gitignore` 排除，不入库）。
 
 > Docker 排障记录：若 `docker compose up` 卡住，多为 frontend 镜像 `npm ci`
-> 走官方源所致，本项目已内置 `frontend/.npmrc`（npmmirror）规避。详见 `docs/enterprise-optimization-plan.md`。
+> 走官方源所致，本项目已内置 `frontend/.npmrc`（npmmirror）规避。详见 [部署文档](docs/deployment.md)。
 
 ### 备份与定时任务
 
@@ -164,7 +164,7 @@ python -m scripts.backup_cron --interval-hours 3
 ## 测试与 CI
 
 ```bash
-# 后端单测（60+ 用例，mock 掉云端，无需 API Key）
+# 后端单测（130+ 用例，mock 掉云端，无需 API Key）
 .venv\Scripts\python.exe -m pytest
 # 覆盖率
 .venv\Scripts\python.exe -m pytest --cov=backend --cov-report=term-missing
@@ -188,15 +188,20 @@ water-rag-local/
 │   └── agents/           # LangGraph Agent
 ├── frontend/             # Vue3 + TS + Pinia 前端
 ├── scripts/              # 初始化/备份/评测/冒烟脚本
-├── tests/                # 单元测试（tests/unit）
-├── docs/                 # 设计/优化文档
+├── tests/                # 单元测试（tests/unit）+ 检索评测集（tests/evaluation）
+├── docs/                 # 文档（架构 / API / 部署 / 开发 / 安全）
+│   └── planning/         # 内部规划文档（优化过程存档，非公开入口）
 └── data/                 # 运行时数据（勿提交 Git）
 ```
 
 ## 文档
 
-- [企业级优化方案（差距→改法→验证）](docs/enterprise-optimization-plan.md)
-- [优化方案 v1（已落地）](docs/optimization-plan.md)
+- [架构](docs/architecture.md) — 系统设计、检索管线、SSE 契约
+- [API 契约](docs/api.md) — 端点一览、双聊天端点设计意图
+- [部署与运维](docs/deployment.md) — Docker / 备份 / 环境变量
+- [开发指南](docs/development.md) — 本地启动、测试、代码规范
+- [安全设计](docs/security.md) — 认证 / 密钥 / 数据隔离
+- [内部规划文档](docs/planning/) — 优化过程分析存档（供参考，非公开入口）
 
 ## 许可证
 
