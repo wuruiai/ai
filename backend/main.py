@@ -80,6 +80,14 @@ async def lifespan(app: FastAPI):
 
     yield
     logger.info("Shutting down...")
+    # 关闭连接池（G4.2）：不关会导致 aiosqlite 后台线程拖住进程不退出（Docker stop 挂起）
+    try:
+        from backend.db.connection import _db_pool
+
+        await _db_pool.close()
+    except Exception:
+        # 关闭兜底，不应阻止进程退出
+        logger.exception("db pool close failed")
 
 
 app = FastAPI(

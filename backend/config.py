@@ -93,6 +93,8 @@ class Settings(BaseSettings):
 
     # 本地数据路径
     SQLITE_PATH: str = "./data/water.db"
+    # SQLite 连接池大小（G4.2）；<=1 时禁用池化（测试用 0）
+    DB_POOL_SIZE: int = 5
     CHROMA_PATH: str = "./data/chroma"
     CHROMA_COLLECTION: str = "water_knowledge"
     SOURCE_PATH: str = "./data/source"
