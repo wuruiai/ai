@@ -31,7 +31,7 @@ async def test_retrieve_user_scoping_dense(monkeypatch):
     class FakeVS:
         seen: ClassVar[dict] = {}
 
-        def query(self, query_embedding, n_results, where):
+        async def query(self, query_embedding, n_results, where):
             FakeVS.seen = where
             return {
                 "ids": [["c1"]],

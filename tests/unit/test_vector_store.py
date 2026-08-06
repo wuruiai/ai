@@ -1,4 +1,4 @@
-"""Chroma 向量存储测试（临时库）。"""
+"""Chroma 向量存储测试（临时库；G4.3 后走 async 入口）。"""
 
 from backend.rag.vector_store import VectorStore
 
@@ -8,13 +8,13 @@ def _fresh_store() -> VectorStore:
     return VectorStore()
 
 
-def test_vector_store_add_query_delete():
+async def test_vector_store_add_query_delete():
     vs = _fresh_store()
     # 清空集合，避免与其它测试共享同一 collection 造成计数干扰
     existing = vs._collection.get()["ids"]
     if existing:
         vs._collection.delete(ids=existing)
-    vs.add_documents(
+    await vs.add_documents(
         ids=["c1", "c2"],
         documents=["水利内容一", "水利内容二"],
         embeddings=[[0.1] * 4, [0.2] * 4],
@@ -23,16 +23,16 @@ def test_vector_store_add_query_delete():
             {"document_id": "d2", "user_id": "u1"},
         ],
     )
-    assert vs.count() == 2
+    assert await vs.count() == 2
 
-    res = vs.query([0.1] * 4, n_results=2)
+    res = await vs.query([0.1] * 4, n_results=2)
     assert len(res["ids"][0]) == 2
 
     # 按用户过滤
-    res = vs.query([0.1] * 4, n_results=2, where={"user_id": "u1"})
+    res = await vs.query([0.1] * 4, n_results=2, where={"user_id": "u1"})
     assert len(res["ids"][0]) == 2
 
     # 删除一个文档
-    removed = vs.delete_by_document("d1")
+    removed = await vs.delete_by_document("d1")
     assert removed == 1
-    assert vs.count() == 1
+    assert await vs.count() == 1

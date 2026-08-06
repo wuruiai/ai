@@ -172,7 +172,7 @@ async def ingest_document(
         # 5. INDEXING（chroma 写入；FTS 由 chunks 触发器自动同步，无需再调）
         await _set_status(document_id, IngestionStatus.INDEXING)
         try:
-            vector_store.add_documents(
+            await vector_store.add_documents(
                 ids=chunk_ids,
                 documents=contents,
                 embeddings=embeddings,

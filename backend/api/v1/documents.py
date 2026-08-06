@@ -491,7 +491,7 @@ async def delete_document(
         # 幽灵结果。此前顺序是"先删 DB 再清 Chroma，失败仅 warning 吞掉"，会留下
         # 永久幽灵向量且无法再删一次清理（DB 行已不存在）。
         try:
-            removed = vector_store.delete_by_document(document_id)
+            removed = await vector_store.delete_by_document(document_id)
             if removed:
                 logger.info("deleted %d vectors for document %s", removed, document_id[:12])
         except Exception as e:  # noqa: BLE001

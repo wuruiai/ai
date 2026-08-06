@@ -36,7 +36,7 @@ async def _check_deps() -> dict:
     try:
         from backend.rag.vector_store import vector_store
 
-        vector_store.count()
+        await vector_store.count()
         checks["chroma"] = True
     except Exception:  # noqa: BLE001
         checks["chroma"] = False

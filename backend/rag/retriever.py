@@ -75,7 +75,7 @@ async def retrieve(
     dense_results = []
     try:
         query_embedding = await get_embedding(query)
-        vs_query = vector_store.query(
+        vs_query = await vector_store.query(
             query_embedding=query_embedding,
             n_results=settings.DENSE_TOP_K,
             where=where,
