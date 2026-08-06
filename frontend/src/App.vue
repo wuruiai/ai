@@ -2,7 +2,7 @@
   <div id="app">
     <!-- 登录页：无侧边栏 -->
     <template v-if="route.path === '/login'">
-      <router-view />
+      <BoundaryRouterView />
     </template>
 
     <!-- 主布局：深色侧边栏 + 内容区 -->
@@ -50,7 +50,7 @@
       </aside>
 
       <main class="main-area">
-        <router-view />
+        <BoundaryRouterView />
       </main>
     </div>
   </div>
@@ -60,6 +60,7 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import BoundaryRouterView from '@/components/BoundaryRouterView.vue'
 
 const route = useRoute()
 const router = useRouter()

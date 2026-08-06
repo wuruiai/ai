@@ -81,6 +81,7 @@
 import { onMounted, ref, nextTick } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import { renderMarkdown } from '@/utils/markdown'
+import { extractError } from '@/utils/error'
 import CitationPanel from '@/components/CitationPanel.vue'
 import FeedbackButton from '@/components/FeedbackButton.vue'
 import HighRiskWarning from '@/components/HighRiskWarning.vue'
@@ -165,7 +166,13 @@ function sendMessage() {
   if (!query.value.trim() || chatStore.isLoading) return
   const q = query.value
   query.value = ''
-  chatStore.sendMessage(q).then(() => scrollToBottom())
+  chatStore
+    .sendMessage(q)
+    .then(() => scrollToBottom())
+    .catch((err) => {
+      // 兜底（G6.3）：streamChat 回调内异常时走统一错误提取，避免未处理 rejection
+      chatStore.error = extractError(err)
+    })
 }
 
 function scrollToBottom() {
