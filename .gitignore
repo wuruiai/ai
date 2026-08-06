@@ -33,6 +33,7 @@ data/*
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+frontend/coverage/
 
 # 日志
 *.log
