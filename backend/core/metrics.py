@@ -38,9 +38,11 @@ HTTP_REQUEST_DURATION = Histogram(
 # LLM 调用指标（G10.9 M10）：次数 / token / 耗时 / 成本，按 model 分维度。
 # 由 UsageCollector 逐调用打点（on_llm_start 记开始时间，on_llm_end 落点），
 # 与 llm_usage 表（明细/审计）互补——这里是实时聚合，供 Grafana 看板。
+# 注意：llm_calls_total 对「所有」调用打点（含无 usage 的降级/异常路径，此时
+# token/成本计数为 0），所以文案是总调用数而非仅成功计费调用。
 LLM_CALLS = Counter(
     "llm_calls_total",
-    "LLM invocations (successful usage-bearing calls)",
+    "LLM invocations (all calls, incl. degraded/no-usage)",
     ("model",),
 )
 LLM_TOKENS = Counter(

@@ -1,8 +1,11 @@
 """文档 CRUD API 测试（mock 摄取，避免云端 embedding）。"""
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from backend.api.v1 import documents as doc_api
+from backend.config import settings
 from backend.main import app
 
 
@@ -138,3 +141,69 @@ def test_cross_user_duplicate_upload_409(monkeypatch):
         )
         assert rB.status_code == 409
         assert victim_id not in rB.text
+
+
+def _count_source_files(doc_id: str) -> list[str]:
+    """统计 source/ 下该文档（内容哈希前缀）对应的落盘文件名。"""
+    src = Path(settings.SOURCE_PATH)
+    return [p.name for p in src.iterdir() if p.name.startswith(f"{doc_id}_")]
+
+
+def test_duplicate_upload_leaves_no_orphan_file(monkeypatch):
+    """G10.12：先查重后写盘——同用户以不同文件名重复上传同内容，不留下孤儿文件。"""
+    monkeypatch.setattr(doc_api, "_spawn_ingestion", _noop_ingestion)
+    with TestClient(app) as c:
+        tok, _ = _register(c, "orphan_dup")
+        h = {"Authorization": f"Bearer {tok}"}
+        payload = b"orphan check content bytes"
+
+        r1 = c.post(
+            "/api/v1/documents/",
+            files={"file": ("a.txt", payload, "text/plain")},
+            headers=h,
+        )
+        assert r1.status_code == 201
+        doc_id = r1.json()["document_id"]
+
+        # 同内容不同文件名 → 幂等返回原文档，且不应新增落盘副本
+        r2 = c.post(
+            "/api/v1/documents/",
+            files={"file": ("b.txt", payload, "text/plain")},
+            headers=h,
+        )
+        assert r2.status_code == 201
+        assert r2.json()["document_id"] == doc_id
+
+        files = _count_source_files(doc_id)
+        # 只有首次上传的 a.txt 被引用；b.txt 不得残留（此前版本会留下孤儿文件）
+        assert files == [f"{doc_id}_a.txt"]
+
+
+def test_cross_user_duplicate_leaves_no_orphan_file(monkeypatch):
+    """G10.12：跨用户 409 路径同样不写盘——他人同内容上传不得残留孤儿文件。"""
+    monkeypatch.setattr(doc_api, "_spawn_ingestion", _noop_ingestion)
+    with TestClient(app) as c:
+        tokA, _ = _register(c, "orphan_a")
+        tokB, _ = _register(c, "orphan_b")
+        hA = {"Authorization": f"Bearer {tokA}"}
+        hB = {"Authorization": f"Bearer {tokB}"}
+        payload = b"cross orphan content bytes"
+
+        rA = c.post(
+            "/api/v1/documents/",
+            files={"file": ("a.txt", payload, "text/plain")},
+            headers=hA,
+        )
+        assert rA.status_code == 201
+        doc_id = rA.json()["document_id"]
+
+        # B 上传同内容不同文件名 → 409（S1 跨用户隔离）
+        rB = c.post(
+            "/api/v1/documents/",
+            files={"file": ("zz.txt", payload, "text/plain")},
+            headers=hB,
+        )
+        assert rB.status_code == 409
+
+        # 只有 A 的 a.txt 被引用；B 的 zz.txt 不得落盘
+        assert _count_source_files(doc_id) == [f"{doc_id}_a.txt"]

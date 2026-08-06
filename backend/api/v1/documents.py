@@ -223,13 +223,45 @@ async def upload_document(
     file_hash = _calc_hash(content)
     document_id = file_hash  # 用 sha256 作主键，重复上传天然幂等
 
-    # 用 INSERT OR IGNORE + rowcount 做原子查重，避免并发上传 TOCTOU 竞态
-    # （sha256 主键天然幂等：并发同文件时第二个 insert 被忽略）
     db = await get_connection()
     source_dir = Path(settings.SOURCE_PATH)
     source_dir.mkdir(parents=True, exist_ok=True)
     try:
-        # 落盘：只用 filename 的 basename（剥离目录部分，防路径穿越），
+        # 先查重后写盘（G10.12）：重复上传直接短路返回，不再"先落盘再发现重复"——
+        # 否则同内容不同文件名（或跨用户 409）会在 source/ 留下未被任何记录引用的孤儿文件。
+        async with db.execute(
+            "SELECT document_id, file_name, file_size, status, stored_path, user_id "
+            "FROM documents WHERE file_hash=? LIMIT 1",
+            (file_hash,),
+        ) as cur_existing:
+            existing = await cur_existing.fetchone()
+
+        if existing:
+            doc_id, doc_name, doc_size, doc_status, stored, owner_user_id = existing
+            # 跨用户隔离（S1）：内容哈希幂等仅限同属主。他人已上传的同内容文件，
+            # 返回 409 且不泄露其 document_id / 元数据 / 状态（防跨用户文件枚举）。
+            if owner_user_id != user.user_id:
+                raise HTTPException(status_code=409, detail="file already exists")
+            # 失败/中断的文档允许"重传重试"：重新触发摄取（成功文档保持幂等返回）。
+            # 此前失败/中间态的文档重复上传只会拿回旧状态，摄取永远不会重跑。
+            if doc_status != IngestionStatus.READY.value and stored:
+                await _spawn_ingestion(doc_id)
+                return DocumentUploadResponse(
+                    document_id=doc_id,
+                    file_name=doc_name,
+                    file_size=doc_size,
+                    file_hash=file_hash,
+                    status=IngestionStatus.PENDING.value,
+                )
+            return DocumentUploadResponse(
+                document_id=doc_id,
+                file_name=doc_name,
+                file_size=doc_size,
+                file_hash=file_hash,
+                status=doc_status,
+            )
+
+        # 未重复：落盘。只用 filename 的 basename（剥离目录部分，防路径穿越），
         # document_id 前缀避免重名覆盖；原始 filename 仍用于展示
         safe_basename = Path(file.filename).name
         stored_path = source_dir / f"{document_id}_{safe_basename}"
@@ -240,7 +272,8 @@ async def upload_document(
         # 大文件写盘放线程池，避免阻塞事件循环（SSE 等并发请求被卡住）
         await asyncio.to_thread(stored_path.write_bytes, content)
 
-        # 入库（幂等：document_id 即 file_hash，重复 upload 时 INSERT 被忽略）
+        # 入库（原子幂等：document_id 即 file_hash，并发同内容时仅一个 INSERT 生效，
+        # 第二个被 IGNORE → rowcount=0，进入下方竞态清理）
         title = Path(file.filename).stem
         cur = await db.execute(
             "INSERT OR IGNORE INTO documents "
@@ -262,7 +295,7 @@ async def upload_document(
         await db.commit()
 
         if cur.rowcount == 0:
-            # 已存在（并发上传或重复上传）
+            # 竞态：我们查重后、INSERT 前，另一请求已插入同 hash 文档（并发双传）。
             async with db.execute(
                 "SELECT document_id, file_name, file_size, status, stored_path, user_id "
                 "FROM documents WHERE file_hash=? LIMIT 1",
@@ -270,29 +303,22 @@ async def upload_document(
             ) as cur2:
                 existing = await cur2.fetchone()
             if existing:
-                doc_id, doc_name, doc_size, doc_status, stored, owner_user_id = existing
-                # 跨用户隔离（S1）：内容哈希幂等仅限同属主。他人已上传的同内容文件，
-                # 返回 409 且不泄露其 document_id / 元数据 / 状态（防跨用户文件枚举）。
+                _, _, _, _, stored, owner_user_id = existing
+                # 清理我们刚写的副本：路径与权威记录不同（同内容不同文件名）才删——
+                # 该文件不被任何记录引用是孤儿；路径相同说明内容文件已被权威记录引用，不能删。
+                if str(stored_path) != stored:
+                    stored_path.unlink(missing_ok=True)
                 if owner_user_id != user.user_id:
                     raise HTTPException(status_code=409, detail="file already exists")
-                # 失败/中断的文档允许"重传重试"：重新触发摄取（成功文档保持幂等返回）。
-                # 此前失败/中间态的文档重复上传只会拿回旧状态，摄取永远不会重跑。
-                if doc_status != IngestionStatus.READY.value and stored:
-                    await _spawn_ingestion(doc_id)
-                    return DocumentUploadResponse(
-                        document_id=doc_id,
-                        file_name=doc_name,
-                        file_size=doc_size,
-                        file_hash=file_hash,
-                        status=IngestionStatus.PENDING.value,
-                    )
                 return DocumentUploadResponse(
-                    document_id=doc_id,
-                    file_name=doc_name,
-                    file_size=doc_size,
+                    document_id=existing[0],
+                    file_name=existing[1],
+                    file_size=existing[2],
                     file_hash=file_hash,
-                    status=doc_status,
+                    status=existing[3],
                 )
+            # 极罕见：权威行在 INSERT 与重查之间被并发删除——拒绝并提示重试
+            raise HTTPException(status_code=409, detail="file already exists")
     finally:
         await close_db(db)
 

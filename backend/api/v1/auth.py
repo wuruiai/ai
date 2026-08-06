@@ -38,7 +38,10 @@ router = APIRouter()
 # 开发留空时进程级随机（重启后旧 token 失效，仅限开发便利）
 _process_secret = settings.TOKEN_SECRET or uuid.uuid4().hex
 
-_PBKDF2_ITERATIONS = 100_000
+# OWASP 2023 密码存储建议：PBKDF2-HMAC-SHA256 至少 600_000 次迭代。
+# 迭代数写入哈希串（pbkdf2$<iter>$<salt>$<dk>），verify 时按存储值读取——
+# 提高本常量只影响新哈希，存量密码哈希仍可按旧迭代数正常校验，无需强制重登。
+_PBKDF2_ITERATIONS = 600_000
 
 # 注册按 IP 滑动窗口限流（G10.5）：内存/Redis 可插拔，计数维度为 `register:{ip}`。
 # 不能用登录防爆破（LoginThrottle 是失败锁定语义）：注册滥发是"每次都成功"，
