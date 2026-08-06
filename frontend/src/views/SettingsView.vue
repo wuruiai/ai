@@ -6,12 +6,12 @@
     <div class="settings-content">
       <h2>账号安全</h2>
       <form @submit.prevent="changePassword" class="pw-form">
-        <label class="field-label">旧密码</label>
-        <input v-model="oldPw" type="password" class="field" required autocomplete="current-password" />
-        <label class="field-label">新密码（至少 6 位）</label>
-        <input v-model="newPw" type="password" class="field" required minlength="6" autocomplete="new-password" />
-        <label class="field-label">确认新密码</label>
-        <input v-model="confirmPw" type="password" class="field" required minlength="6" autocomplete="new-password" />
+        <label class="field-label" for="old-password">旧密码</label>
+        <input id="old-password" v-model="oldPw" type="password" class="field" required autocomplete="current-password" />
+        <label class="field-label" for="new-password">新密码（至少 6 位）</label>
+        <input id="new-password" v-model="newPw" type="password" class="field" required minlength="6" autocomplete="new-password" />
+        <label class="field-label" for="confirm-password">确认新密码</label>
+        <input id="confirm-password" v-model="confirmPw" type="password" class="field" required minlength="6" autocomplete="new-password" />
         <div v-if="pwMsg" :class="['msg', pwOk ? 'ok' : 'err']">{{ pwMsg }}</div>
         <button type="submit" class="submit-btn" :disabled="pwSaving">{{ pwSaving ? '保存中...' : '修改密码' }}</button>
       </form>
@@ -36,7 +36,7 @@
             </tr>
           </tbody>
         </table>
-        <button @click="loadDiagnostics" :disabled="loading" class="refresh-btn">
+        <button type="button" @click="loadDiagnostics" :disabled="loading" class="refresh-btn">
           {{ loading ? '加载中...' : '刷新' }}
         </button>
       </template>

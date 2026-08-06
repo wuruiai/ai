@@ -1,7 +1,7 @@
 <template>
   <div class="chat-layout">
     <aside class="thread-sidebar">
-      <button class="new-chat-btn" @click="newConversation">＋ 新对话</button>
+      <button type="button" class="new-chat-btn" @click="newConversation">＋ 新对话</button>
       <div v-if="!chatStore.threads.length" class="no-threads">暂无历史会话</div>
       <ul class="thread-list">
         <li
@@ -11,7 +11,7 @@
           @click="switchThread(t.thread_id)"
         >
           <span class="thread-title" :title="t.title">{{ t.title }}</span>
-          <button class="thread-delete" title="删除会话" @click.stop="removeThread(t.thread_id)">✕</button>
+          <button type="button" class="thread-delete" title="删除会话" aria-label="删除会话" @click.stop="removeThread(t.thread_id)">✕</button>
         </li>
       </ul>
     </aside>
@@ -40,8 +40,8 @@
             <CitationPanel :citations="message.citations" />
           </div>
           <div v-if="message.role === 'assistant'" class="message-footer">
-            <button class="footer-btn" title="复制回答" @click="copyMessage(message)">📋 复制</button>
-            <button v-if="isLastMessage(message) && chatStore.lastQuery" class="footer-btn" title="重新生成" @click="resend()">🔄 重试</button>
+            <button type="button" class="footer-btn" title="复制回答" @click="copyMessage(message)">📋 复制</button>
+            <button v-if="isLastMessage(message) && chatStore.lastQuery" type="button" class="footer-btn" title="重新生成" @click="resend()">🔄 重试</button>
             <FeedbackButton v-if="message.messageId" :message-id="message.messageId" />
           </div>
         </div>
@@ -61,15 +61,16 @@
       <textarea
         v-model="query"
         placeholder="输入您的问题，Ctrl+Enter 或回车发送..."
+        aria-label="输入您的问题"
         @keydown.enter.ctrl.prevent="sendMessage"
         @keydown.enter.exact.prevent="sendMessage"
         @input="autoResize"
         rows="1"
       />
-      <button v-if="chatStore.isLoading" @click="chatStore.stopGeneration()" class="stop-btn">
+      <button v-if="chatStore.isLoading" type="button" @click="chatStore.stopGeneration()" class="stop-btn">
         ⏹ 停止
       </button>
-      <button v-else @click="sendMessage" class="send-btn">
+      <button v-else type="button" @click="sendMessage" class="send-btn">
         发送
       </button>
     </div>

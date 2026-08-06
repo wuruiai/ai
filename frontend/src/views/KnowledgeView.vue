@@ -11,7 +11,7 @@
 
     <div v-if="categories.length" class="filter-row">
       <label class="filter-label">分类：</label>
-      <select v-model="categoryFilter" class="filter-select" @change="loadDocuments">
+      <select v-model="categoryFilter" class="filter-select" aria-label="按分类筛选" @change="loadDocuments">
         <option value="">全部</option>
         <option v-for="c in categories" :key="c" :value="c">{{ c }}</option>
       </select>
@@ -45,20 +45,20 @@
         </div>
         <div class="doc-actions">
           <router-link :to="`/document/${doc.document_id}`" class="action-link">详情</router-link>
-          <button @click="toggleEdit(doc)" class="edit-btn">管理</button>
-          <button @click="deleteDoc(doc.document_id)" class="delete-btn">删除</button>
+          <button type="button" @click="toggleEdit(doc)" class="edit-btn">管理</button>
+          <button type="button" @click="deleteDoc(doc.document_id)" class="delete-btn">删除</button>
         </div>
 
         <!-- 知识库管理：分类 / 标签 / 启用 -->
         <div v-if="editingId === doc.document_id" class="doc-edit">
-          <input v-model="editCategory" class="edit-input" placeholder="分类（如：防洪 / 灌溉 / 规范）" maxlength="64" />
-          <input v-model="editTags" class="edit-input" placeholder="标签（逗号分隔）" maxlength="200" />
+          <input v-model="editCategory" class="edit-input" aria-label="文档分类" placeholder="分类（如：防洪 / 灌溉 / 规范）" maxlength="64" />
+          <input v-model="editTags" class="edit-input" aria-label="文档标签" placeholder="标签（逗号分隔）" maxlength="200" />
           <label class="enable-label">
             <input v-model="editEnabled" type="checkbox" /> 启用该文档参与检索
           </label>
           <div class="edit-actions">
-            <button class="save-btn" @click="saveEdit(doc)">保存</button>
-            <button class="cancel-btn" @click="editingId = null">取消</button>
+            <button type="button" class="save-btn" @click="saveEdit(doc)">保存</button>
+            <button type="button" class="cancel-btn" @click="editingId = null">取消</button>
           </div>
         </div>
       </div>

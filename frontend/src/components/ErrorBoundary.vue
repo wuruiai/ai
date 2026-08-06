@@ -4,7 +4,7 @@
       <div class="eb-icon">⚠️</div>
       <div class="eb-title">页面渲染异常</div>
       <div class="eb-detail">{{ message || '未知错误' }}</div>
-      <button class="eb-btn" @click="reload">重新加载</button>
+      <button type="button" class="eb-btn" @click="reload">重新加载</button>
     </div>
   </div>
   <slot v-else />

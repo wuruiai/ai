@@ -3,18 +3,18 @@
     <div class="login-card">
       <div class="login-brand">💧 水利 RAG + Agent</div>
       <div class="tabs">
-        <button :class="['tab', { active: mode === 'login' }]" @click="mode = 'login'">登录</button>
-        <button :class="['tab', { active: mode === 'register' }]" @click="mode = 'register'">注册</button>
+        <button type="button" :class="['tab', { active: mode === 'login' }]" @click="mode = 'login'">登录</button>
+        <button type="button" :class="['tab', { active: mode === 'register' }]" @click="mode = 'register'">注册</button>
       </div>
       <form @submit.prevent="submit">
-        <label class="field-label">用户名</label>
-        <input v-model="username" class="field" required minlength="3" maxlength="32"
+        <label class="field-label" for="login-username">用户名</label>
+        <input id="login-username" v-model="username" class="field" required minlength="3" maxlength="32"
                placeholder="字母 / 数字 / 下划线" autocomplete="username" />
-        <label class="field-label">密码</label>
-        <input v-model="password" type="password" class="field" required minlength="6"
+        <label class="field-label" for="login-password">密码</label>
+        <input id="login-password" v-model="password" type="password" class="field" required minlength="6"
                :placeholder="mode === 'register' ? '至少 6 位' : '请输入密码'" autocomplete="current-password" />
-        <label v-if="mode === 'register'" class="field-label">显示名称</label>
-        <input v-if="mode === 'register'" v-model="displayName" class="field" maxlength="64"
+        <label v-if="mode === 'register'" class="field-label" for="login-display-name">显示名称</label>
+        <input v-if="mode === 'register'" id="login-display-name" v-model="displayName" class="field" maxlength="64"
                placeholder="可选" autocomplete="nickname" />
         <div v-if="error" class="login-error">⚠️ {{ error }}</div>
         <button type="submit" class="submit-btn" :disabled="loading">

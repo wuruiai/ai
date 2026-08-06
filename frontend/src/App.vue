@@ -47,7 +47,7 @@
               <div class="user-name">{{ authStore.user?.display_name || authStore.user?.username || '未登录' }}</div>
               <div class="user-role">{{ authStore.isAdmin ? '管理员' : '普通用户' }}</div>
             </div>
-            <button class="logout-btn" title="退出登录" @click="logout">⎋</button>
+            <button type="button" class="logout-btn" title="退出登录" aria-label="退出登录" @click="logout">⎋</button>
           </div>
         </div>
       </aside>

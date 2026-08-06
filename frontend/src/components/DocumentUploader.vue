@@ -4,10 +4,12 @@
       type="file"
       ref="fileInput"
       accept=".pdf,.docx,.txt,.md"
+      aria-label="选择要上传的文档"
       @change="onFileChange"
       style="display: none"
     />
-    <button @click="triggerUpload" :disabled="isUploading">
+    <!-- M9：type="button" 避免按钮成为表单隐式提交（本组件可被放进 <form> 场景） -->
+    <button type="button" @click="triggerUpload" :disabled="isUploading">
       {{ isUploading ? '上传中...' : '上传文档' }}
     </button>
     <span v-if="selectedFile" class="filename">{{ selectedFile.name }}</span>

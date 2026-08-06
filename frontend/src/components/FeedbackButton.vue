@@ -1,6 +1,7 @@
 <template>
   <div class="feedback-button">
     <button
+      type="button"
       @click="submitFeedback('helpful')"
       :disabled="submitted"
       :class="{ active: rating === 'helpful' }"
@@ -8,6 +9,7 @@
       👍 有帮助
     </button>
     <button
+      type="button"
       @click="submitFeedback('not_helpful')"
       :disabled="submitted"
       :class="{ active: rating === 'not_helpful' }"

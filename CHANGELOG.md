@@ -23,6 +23,16 @@
 
 ### Fixed
 
+- **前端质量：multipart 修复 + 可访问性 + 覆盖率门禁（G10.11）**：① **M14** `uploadDocument`
+  不再手动设 `Content-Type: multipart/form-data`——axios 传 FormData 时需由浏览器自动生成带
+  boundary 的头，手动设置会丢 boundary 导致 FastAPI 无法解析文件字段；补回归测试断言上传
+  只传 2 个参数。② **M9 可访问性**——全量组件按钮补显式 `type="button"`（表单内按钮不再因
+  默认 `type="submit"` 意外隐式提交），登录/改密表单改用 `label for`/`id` 关联、知识库编辑
+  输入框与会话筛选补 `aria-label`，无标签控件全部具备可访问名称。③ **M7 前端覆盖率门禁**——
+  `vite.config` 加 `thresholds`（Statements≥35 / Branches≥25 / Functions≥30 / Lines≥35），
+  CI frontend job 从 `npm run test` 升级为 `npm run coverage`（低于门槛即失败，与后端
+  `--cov-fail-under=70` 对齐）；补 document/auth/feedback/threads API 与 format/error/markdown
+  工具共 7 个测试文件 31 个用例，覆盖率 Statements 34.3%→39.3%、Functions 24.9%→33.9%。
 - **任务队列入队原子化 + 租约续期（G10.8）**：① 入队从「SELECT 查重 → INSERT」两步改为单条
   `INSERT ... SELECT ... WHERE NOT EXISTS` 原子语句——并发上传同一文档不再双插两条 pending
   被两个 worker 抢走双重摄取（`enqueue` 返回是否真正插入，幂等可判）；② 运行期租约心跳——

@@ -140,7 +140,7 @@ jobs:
         run: cd frontend && npm ci
       - name: Type check
         run: cd frontend && npm run type-check
-      - name: Unit tests
-        run: cd frontend && npm run test
+      - name: Unit tests + coverage（M7 覆盖率门禁，低于 vite.config thresholds 即失败）
+        run: cd frontend && npm run coverage
       - name: Build
         run: cd frontend && npm run build

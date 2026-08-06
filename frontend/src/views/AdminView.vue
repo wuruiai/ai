@@ -65,8 +65,8 @@
     <div class="section">
       <h2 class="section-title">数据导出</h2>
       <div class="export-actions">
-        <button class="btn" @click="exportData('threads')">📄 导出对话记录 (CSV)</button>
-        <button class="btn" @click="exportData('feedback')">📊 导出反馈 (CSV)</button>
+        <button type="button" class="btn" @click="exportData('threads')">📄 导出对话记录 (CSV)</button>
+        <button type="button" class="btn" @click="exportData('feedback')">📊 导出反馈 (CSV)</button>
       </div>
     </div>
 
@@ -87,7 +87,7 @@
             <td>{{ u.username }}</td>
             <td>{{ u.display_name || '-' }}</td>
             <td>
-              <select :value="u.role" class="role-select" @change="changeRole(u, ($event.target as HTMLSelectElement).value)">
+              <select :value="u.role" class="role-select" aria-label="修改角色" @change="changeRole(u, ($event.target as HTMLSelectElement).value)">
                 <option value="user">用户</option>
                 <option value="admin">管理员</option>
               </select>
@@ -98,7 +98,7 @@
               </span>
             </td>
             <td>
-              <button class="mini-btn" @click="toggleActive(u)">
+              <button type="button" class="mini-btn" @click="toggleActive(u)">
                 {{ u.is_active ? '禁用' : '启用' }}
               </button>
             </td>

@@ -17,6 +17,16 @@ export default defineConfig({
       provider: 'v8',
       include: ['src/**/*.{ts,vue}'],
       exclude: ['src/**/*.test.ts', 'src/main.ts'],
+      // M7：前端覆盖率门禁（CI 跑 npm run coverage 强制校验）。
+      // 门槛定在实测值（Stmts 39.3 / Branch 28.6 / Funcs 33.9 / Lines 38.5）之下，
+      // 既阻断「新增代码把覆盖率拉低」的回归，又留有正常迭代空间；
+      // 补测试应提高实际值，门槛只在覆盖率下降时报警。
+      thresholds: {
+        statements: 35,
+        branches: 25,
+        functions: 30,
+        lines: 35,
+      },
     },
   },
   server: {

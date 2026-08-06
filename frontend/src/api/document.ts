@@ -8,11 +8,10 @@ export async function getDocuments() {
 export async function uploadDocument(file: File) {
   const formData = new FormData()
   formData.append('file', file)
-  const response = await client.post('/documents/', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data',
-    },
-  })
+  // M14：不能手动设 Content-Type——axios 传 FormData 时需由浏览器自动生成
+  // 带 boundary 的 multipart 头；手动设 `multipart/form-data` 会丢失 boundary，
+  // FastAPI 无法解析文件字段（500/422）。
+  const response = await client.post('/documents/', formData)
   return response.data
 }
 
