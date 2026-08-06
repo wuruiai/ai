@@ -8,6 +8,9 @@
 
 ### Fixed
 
+- **CI 镜像构建闭环（G10.2）**：新增 `build-images` CI job，构建 backend/frontend 镜像
+  并打版本 + 短 sha 不可变 tag；master + 配置 `GHCR_PAT` secret 时推送 GHCR，未配置时
+  退化为「镜像能构建」验证——补齐生产 compose「CI 负责构建并推送镜像」此前缺失的环节。
 - **统一入口成本闭环（G9.1）**：预算改为**每用户计数**（`DAILY_CALL_LIMIT` 即每用户每日
   调用上限），内存/Redis 后端均按 `user_id` 隔离；`unified-chat` 流式端点补齐预算拦截，
   非流式端点补齐预算拦截 + LLM 用量记账（此前两个端点完全绕过成本控制）。
@@ -27,6 +30,10 @@
 
 ### Security
 
+- **跨用户数据隔离（G10.1）**：`document_analysis` 检索强制带 `user_id`（`document_id`
+  非全局唯一键，此前只按它过滤可跨用户读取他人文档）；orchestrator 禁止客户端
+  `context` 覆盖身份字段（`user_id` / `student_id` / `session_id`）；重复上传路径校验
+  属主——他人已上传的同内容文件返回 409 且不泄露其元数据。4 个回归测试。
 - **CI 供应链防线（G9.5）**：新增 `security` CI job，双门禁——`gitleaks` 全 git 历史
   密钥泄漏扫描（含已删除文件）+ `pip-audit` 生产依赖已知漏洞审计（OSV 源）。
   任一检出即阻断 PR，从源头拦截 secrets 入库与带漏洞依赖合入。
