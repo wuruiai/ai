@@ -43,19 +43,44 @@ class UsageCollector(BaseCallbackHandler):
         self.input_tokens = 0
         self.output_tokens = 0
         self.model = ""
+        # 流式路径：langchain-openai 1.x 在 on_llm_end 聚合结果里不带 usage，
+        # 改为从流式 chunk 的 usage_metadata 捕获（每轮调用至多一个 chunk 带 usage）
+        self._stream_usage: tuple[int, int, str] | None = None
 
     @property
     def has_usage(self) -> bool:
         return self.input_tokens > 0 or self.output_tokens > 0
 
-    def on_llm_new_token(self, token: str, **kwargs: Any) -> None:
-        # 只关心 on_llm_end 的 usage；逐 token 回调由 TokenStreamHandler 消费
-        pass
+    def on_llm_new_token(self, token: str, *, chunk: Any = None, **kwargs: Any) -> None:
+        """流式 chunk 携带 usage_metadata 时暂存（该调用本轮的总用量）。
+
+        - 逐 token 回调由 TokenStreamHandler 消费，这里只关心 chunk 上带的总 usage；
+        - 回调的 chunk 是 ChatGenerationChunk 包装，usage_metadata 在其 `.message`
+          （AIMessageChunk）上，需先 unwrap；
+        - 每个 OpenAI 兼容流至多一个 chunk 带 usage（通常是最后一个）；
+        - chunk 上无 model 字段，留空由 flush 落到 settings.LLM_MODEL。
+        """
+        # ChatGenerationChunk → AIMessageChunk（无包装时退化为 chunk 本身）
+        msg = getattr(chunk, "message", chunk)
+        usage = getattr(msg, "usage_metadata", None)
+        if not isinstance(usage, dict):
+            return
+        prompt = usage.get("input_tokens")
+        completion = usage.get("output_tokens")
+        if prompt is None or completion is None:
+            return
+        model = getattr(msg, "model", "") or ""
+        self._stream_usage = (int(prompt), int(completion), model)
 
     def on_llm_end(self, response: Any, **kwargs: Any) -> None:
         prompt, completion, model = _extract_usage(response)
         if prompt is None:
-            return  # 无 usage 信息（异常/降级/测试 stub），静默跳过
+            # 聚合结果无 usage（流式路径）时回退到 chunk 捕获值；用完即清
+            if self._stream_usage is not None:
+                prompt, completion, model = self._stream_usage
+                self._stream_usage = None
+            else:
+                return  # 无 usage 信息（异常/降级/测试 stub），静默跳过
         self.input_tokens += prompt
         self.output_tokens += completion
         if model:

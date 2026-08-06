@@ -35,6 +35,7 @@ from backend.core.sse import (
     create_status_event,
     create_token_event,
 )
+from backend.core.usage import UsageCollector
 from backend.db.connection import close_db, get_connection
 
 logger = get_logger(__name__)
@@ -145,6 +146,9 @@ async def unified_chat_stream(
         # 多轮记忆：保存当前消息前加载历史（不含当前轮）
         history = await _load_history(request.session_id, limit=6, user_id=user.user_id)
 
+        # G3.1 用量记账：与 chat/stream 一致，经 llm_callbacks 收集 token，请求结束落库
+        usage_collector = UsageCollector()
+
         agent_request = AgentRequest(
             user_id=user.user_id,
             session_id=request.session_id,
@@ -154,6 +158,7 @@ async def unified_chat_stream(
                 **request.context,
                 "pipeline_key": request.pipeline_key,
                 "history": history,
+                "llm_callbacks": [usage_collector],
             },
             pipeline_mode=request.pipeline_mode,
         )
@@ -170,6 +175,9 @@ async def unified_chat_stream(
             logger.exception("orchestrator crashed")
             yield create_error_event("ORCHESTRATOR_ERROR", str(e)).format()
             return
+        finally:
+            # G3.1：token 用量落库（flush 内部兜底，失败/异常不影响回复）
+            await usage_collector.flush(user.user_id, agent_type=request.agent_type)
 
         if not response.success:
             yield create_error_event(response.error_msg or "AGENT_ERROR", "agent failed").format()

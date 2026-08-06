@@ -35,6 +35,10 @@ class ModelFactory:
             request_timeout=settings.LLM_TIMEOUT_S,
             # streaming=True 时 ainvoke 仍返回完整内容，但会逐 token 触发回调
             streaming=True,
+            # 流式请求显式请求 usage（langchain 只在 OpenAI 默认 base_url 时自动开启，
+            # 自定义 base_url 如 DashScope 默认关闭 → 流式路径丢 token 用量，/admin/usage 恒为 0）。
+            # 开启后流式 chunk 会带 usage_metadata，由 UsageCollector.on_llm_new_token 捕获。
+            stream_usage=True,
             callbacks=callbacks or [],
         )
 

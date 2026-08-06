@@ -46,6 +46,40 @@ def test_collector_skips_when_no_usage():
     assert (c.input_tokens, c.output_tokens) == (0, 0)
 
 
+def _chat_chunk(usage_metadata, model=""):
+    """模拟回调 chunk：ChatGenerationChunk 包装，usage 在其 .message（AIMessageChunk）上。"""
+    return SimpleNamespace(message=SimpleNamespace(usage_metadata=usage_metadata, model=model))
+
+
+def test_collector_captures_usage_from_stream_chunk():
+    """langchain-openai 1.x 流式路径：on_llm_end 聚合结果无 usage，
+    但带 stream_usage=True 后 chunk 携带 usage_metadata → 从 chunk 捕获。"""
+    c = UsageCollector()
+    # 无 usage 的普通 chunk 不产生记录
+    c.on_llm_new_token("水", chunk=_chat_chunk(None))
+    # 最后一个 chunk 携带本调用总用量（OpenAI 兼容流惯例）
+    c.on_llm_new_token(
+        "好",
+        chunk=_chat_chunk(
+            {"input_tokens": 14, "output_tokens": 1, "total_tokens": 15}, "qwen-plus"
+        ),
+    )
+    # 流式聚合结果无 usage → 走 chunk 回退
+    c.on_llm_end(SimpleNamespace(llm_output=None, generations=[]))
+    assert (c.input_tokens, c.output_tokens) == (14, 1)
+    assert c.has_usage
+
+
+def test_collector_stream_chunk_resets_after_end():
+    """每轮 on_llm_end 后清空暂存，避免上一轮 chunk 用量泄漏到下一轮。"""
+    c = UsageCollector()
+    c.on_llm_new_token("好", chunk=_chat_chunk({"input_tokens": 7, "output_tokens": 2}))
+    c.on_llm_end(SimpleNamespace(llm_output=None, generations=[]))
+    # 第二轮无 chunk 用量、无聚合 usage → 静默跳过，不重复累加
+    c.on_llm_end(SimpleNamespace(llm_output=None, generations=[]))
+    assert (c.input_tokens, c.output_tokens) == (7, 2)
+
+
 def test_collector_fallback_generation_info():
     gen = SimpleNamespace(
         generation_info={"token_usage": {"prompt_tokens": 5, "completion_tokens": 3}}
