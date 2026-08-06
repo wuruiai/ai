@@ -10,7 +10,12 @@ Reference: §3.7
     - 任何 SQL 失败整体回滚
     - 连续两次 migrate() 第二次必须空操作（幂等）
     - 应用启动若发现 schema_version 高于代码支持版本 → 拒绝启动（防止旧代码读新库）
+    - 每次应用的迁移写入 migration_log（G4.4 审计）；SQLite DDL 本身是事务性的，
+      因此 migrate()/downgrade() 都能整体回滚
+    - 降级 downgrade() 在 SQLite 能力范围内执行（删表 + DROP COLUMN，SQLite ≥3.35）
 """
+
+from collections.abc import Awaitable, Callable
 
 import aiosqlite
 
@@ -20,6 +25,31 @@ logger = get_logger(__name__)
 
 # 当前代码支持的最高 schema 版本
 SCHEMA_VERSION = 4
+
+
+async def _ensure_framework_tables(db: aiosqlite.Connection) -> None:
+    """保证框架自持表存在：schema_version + migration_log（G4.4）。"""
+    await db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS schema_version (
+            version     INTEGER PRIMARY KEY,
+            description TEXT,
+            applied_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+        )
+        """
+    )
+    await db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS migration_log (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            version    INTEGER NOT NULL,
+            name       TEXT    NOT NULL,
+            status     TEXT    NOT NULL DEFAULT 'applied'
+                       CHECK (status IN ('applied','rolled_back')),
+            created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+        )
+        """
+    )
 
 
 async def get_schema_version(db: aiosqlite.Connection) -> int:
@@ -53,25 +83,22 @@ async def migrate(db: aiosqlite.Connection) -> None:
 
     await db.execute("BEGIN")
     try:
-        # schema_version 表必须先建，后续所有迁移都依赖它
-        await db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS schema_version (
-                version     INTEGER PRIMARY KEY,
-                description TEXT,
-                applied_at  TEXT    NOT NULL DEFAULT (datetime('now'))
-            )
-            """
-        )
+        # 框架表（schema_version + migration_log）先建，后续迁移依赖它
+        await _ensure_framework_tables(db)
 
+        applied: list[int] = []
         if current < 1:
             await _migrate_v1(db)
+            applied.append(1)
         if current < 2:
             await _migrate_v2(db)
+            applied.append(2)
         if current < 3:
             await _migrate_v3(db)
+            applied.append(3)
         if current < 4:
             await _migrate_v4(db)
+            applied.append(4)
 
         # 写版本号（DELETE 旧值保证单行；触发器同步 FTS 也兼容）
         await db.execute("DELETE FROM schema_version")
@@ -82,12 +109,62 @@ async def migrate(db: aiosqlite.Connection) -> None:
                 "v4: llm_usage 用量/成本记账表（G3.1 token 成本核算）",
             ),
         )
+        # G4.4：每次实际应用的迁移写入审计日志（与版本号同一事务，回滚则一并消失）
+        for v in applied:
+            await db.execute(
+                "INSERT INTO migration_log (version, name) VALUES (?, ?)",
+                (v, f"_migrate_v{v}"),
+            )
         await db.commit()
     except Exception:
         await db.rollback()
         raise
 
     logger.info("migrated to v%d", SCHEMA_VERSION)
+
+
+async def downgrade(db: aiosqlite.Connection, to_version: int) -> None:
+    """把 schema 从当前版本降到 to_version（SQLite 能力范围内）。
+
+    - to_version >= 当前版本时为空操作
+    - 逐步执行 _downgrade_vN，删除高于目标版本的迁移
+    - 与 migrate() 同事务：任一步失败整体回滚
+    """
+    current = await get_schema_version(db)
+    if to_version >= current:
+        logger.info("nothing to downgrade (current=%d, to=%d)", current, to_version)
+        return
+    if to_version < 0:
+        raise ValueError("to_version must be >= 0")
+
+    await db.execute("BEGIN")
+    try:
+        await _ensure_framework_tables(db)
+        for v in range(current, to_version, -1):
+            await _apply_downgrade(db, v)
+        await db.execute("DELETE FROM schema_version")
+        await db.execute(
+            "INSERT INTO schema_version (version, description) VALUES (?, ?)",
+            (to_version, f"downgraded from v{current}"),
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+
+    logger.info("downgraded to v%d", to_version)
+
+
+async def _apply_downgrade(db: aiosqlite.Connection, version: int) -> None:
+    """执行单步降级并写 migration_log（status='rolled_back'）。"""
+    handler = _DOWNGRADES.get(version)
+    if handler is None:
+        raise RuntimeError(f"no downgrade handler for v{version}")
+    await handler(db)
+    await db.execute(
+        "INSERT INTO migration_log (version, name, status) VALUES (?, ?, 'rolled_back')",
+        (version, f"_downgrade_v{version}"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -347,3 +424,44 @@ async def _migrate_v4(db: aiosqlite.Connection) -> None:
     await db.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_created ON llm_usage(created_at)")
 
     logger.info("migrate v4 ok (llm_usage)")
+
+
+# ---------------------------------------------------------------------------
+# 降级（G4.4）—— 与升级同源，SQLite DROP COLUMN / DROP TABLE 均为事务性 DDL
+# ---------------------------------------------------------------------------
+
+
+async def _downgrade_v2(db: aiosqlite.Connection) -> None:
+    """v2 → v1：移除 RBAC / 数据归属 / 审计日志 / 知识库结构化列。"""
+    # SQLite DROP COLUMN 不允许列上有索引，先删索引再删列
+    await db.execute("DROP INDEX IF EXISTS idx_documents_user")
+    await db.execute("DROP INDEX IF EXISTS idx_messages_user")
+    await db.execute("ALTER TABLE users DROP COLUMN password_hash")
+    await db.execute("ALTER TABLE users DROP COLUMN role")
+    await db.execute("ALTER TABLE users DROP COLUMN is_active")
+    await db.execute("ALTER TABLE documents DROP COLUMN user_id")
+    await db.execute("ALTER TABLE documents DROP COLUMN category")
+    await db.execute("ALTER TABLE documents DROP COLUMN tags")
+    await db.execute("ALTER TABLE documents DROP COLUMN is_enabled")
+    await db.execute("ALTER TABLE messages DROP COLUMN user_id")
+    await db.execute("DROP TABLE IF EXISTS audit_log")
+
+
+async def _downgrade_v3(db: aiosqlite.Connection) -> None:
+    """v3 → v2：移除 token_version 与 refresh_tokens。"""
+    await db.execute("ALTER TABLE users DROP COLUMN token_version")
+    await db.execute("DROP TABLE IF EXISTS refresh_tokens")
+
+
+async def _downgrade_v4(db: aiosqlite.Connection) -> None:
+    """v4 → v3：移除 llm_usage（append-only 记账表）。"""
+    await db.execute("DROP TABLE IF EXISTS llm_usage")
+
+
+# 降级处理器注册表：version -> handler。
+# 无 v1：降级到 v1 需删除全部基础表（users/documents/chunks/...），属破坏性操作，不支持。
+_DOWNGRADES: dict[int, Callable[[aiosqlite.Connection], Awaitable[None]]] = {
+    4: _downgrade_v4,
+    3: _downgrade_v3,
+    2: _downgrade_v2,
+}

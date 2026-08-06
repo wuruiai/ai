@@ -246,7 +246,7 @@
 
 ## Phase 4 — 任务与数据层
 
-> **实施状态(2026-08-06)**:G4.2 ✅ / G4.3 ✅ / G4.4 ⏳ / G4.1 ⏳（池先行，其余按序）
+> **实施状态(2026-08-06)**:G4.2 ✅ / G4.3 ✅ / G4.4 ✅ / G4.1 ⏳（池与迁移强化先行，任务队列收尾）
 >
 > - G4.2: `backend/db/connection.py` 改有界连接池 `SQLitePool`（asyncio.Queue 空闲复用，
 >   `get_connection`=checkout / `close_db`=checkin 签名不变，调用方零改动）；归还时 rollback
@@ -256,6 +256,10 @@
 > - G4.3: `vector_store.py` 公开方法改 async，内部 `asyncio.to_thread` 把同步 Chroma 调用
 >   丢线程池（不再阻塞事件循环）；调用点 retriever/health/documents/ingestion_worker 全量
 >   改 `await`；`test_vector_store.py` 改 async，`test_retriever.py` FakeVS 改 async。
+> - G4.4: `migrations.py` 加 `migration_log` 审计表（migrate 每步写 applied、降级写 rolled_back，
+>   与版本号同一事务）；补 `downgrade(db, to)` + `_downgrade_v2/v3/v4`（SQLite DROP COLUMN/TABLE，
+>   均事务性）；新增 `scripts/downgrade_db.py --to`；`test_migrations.py` 7 用例覆盖日志、
+>   降级到 v2/v1、降级再升级回补。全套 pytest 115 绿。
 
 ### G4.1 摄取任务持久化队列
 - **现状**:`documents.py:47-51` `asyncio.create_task` 进程内任务,重启丢任务、无重试、多 worker 重复摄取。
