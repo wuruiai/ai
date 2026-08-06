@@ -24,7 +24,7 @@ from backend.rag.chunker import chunk_pages
 from backend.rag.embedding import get_embeddings
 from backend.rag.ids import generate_chunk_id
 from backend.rag.parser import parse_docx, parse_pdf
-from backend.rag.vector_store import vector_store
+from backend.rag.vector_store import document_write_lock, vector_store
 
 logger = get_logger(__name__)
 
@@ -170,23 +170,30 @@ async def ingest_document(
 
         # 5. INDEXING（chroma 写入；FTS 由 chunks 触发器自动同步，无需再调）
         await _set_status(document_id, IngestionStatus.INDEXING)
-        try:
-            await vector_store.add_documents(
-                ids=chunk_ids,
-                documents=contents,
-                embeddings=embeddings,
-                metadatas=[
-                    {
-                        "document_id": document_id,
-                        "page": c.get("page", 1),
-                        "user_id": user_id,
-                    }
-                    for c in chunks
-                ],
-            )
-        except Exception:
-            await _rollback_chunks(document_id)
-            raise
+        # 与 delete_document 共享互斥锁（G9.4）：锁内重新确认文档仍存在，
+        # 杜绝"删除已清向量、摄取又写入"的幽灵向量竞态
+        async with document_write_lock:
+            if not await _document_exists(document_id):
+                logger.info("document %s deleted before indexing, rollback", document_id[:12])
+                await _rollback_chunks(document_id)
+                return IngestionStatus.FAILED
+            try:
+                await vector_store.add_documents(
+                    ids=chunk_ids,
+                    documents=contents,
+                    embeddings=embeddings,
+                    metadatas=[
+                        {
+                            "document_id": document_id,
+                            "page": c.get("page", 1),
+                            "user_id": user_id,
+                        }
+                        for c in chunks
+                    ],
+                )
+            except Exception:
+                await _rollback_chunks(document_id)
+                raise
 
         # 6. READY
         await _set_status(document_id, IngestionStatus.READY)

@@ -26,7 +26,7 @@ from backend.core.logger import get_logger
 from backend.core.rate_limit import check_rate_limit
 from backend.core.security import validate_origin
 from backend.db.connection import close_db, get_connection
-from backend.rag.vector_store import vector_store
+from backend.rag.vector_store import document_write_lock, vector_store
 from backend.tasks.ingestion_worker import IngestionStatus
 from backend.tasks.queue import enqueue
 
@@ -417,20 +417,24 @@ async def delete_document(
         if user.role != "admin" and row[1] != user.user_id:
             raise HTTPException(status_code=404, detail="document not found")
 
-        # 先清 Chroma 向量库：若失败则中止（不删 DB 行），避免"DB 已删、向量残留"的
-        # 幽灵结果。此前顺序是"先删 DB 再清 Chroma，失败仅 warning 吞掉"，会留下
-        # 永久幽灵向量且无法再删一次清理（DB 行已不存在）。
-        try:
-            removed = await vector_store.delete_by_document(document_id)
-            if removed:
-                logger.info("deleted %d vectors for document %s", removed, document_id[:12])
-        except Exception as e:  # noqa: BLE001
-            logger.error("failed to clean vector store for %s: %s", document_id, e)
-            # 500 不向客户端泄露内部细节，from None 切断异常链
-            raise HTTPException(status_code=500, detail="failed to clean vector store") from None
+        # 与摄取 INDEXING 共享互斥锁（G9.4）：锁住"清向量 → 删 DB 行"，
+        # 删除不会插入到摄取的向量写入中间，也保证删除后不会有摄取再写入 → 无幽灵向量。
+        # 先清 Chroma：若失败则中止（不删 DB 行），避免"DB 已删、向量残留"的永久幽灵
+        # （DB 行已不存在，无法再删一次清理）。
+        async with document_write_lock:
+            try:
+                removed = await vector_store.delete_by_document(document_id)
+                if removed:
+                    logger.info("deleted %d vectors for document %s", removed, document_id[:12])
+            except Exception as e:  # noqa: BLE001
+                logger.error("failed to clean vector store for %s: %s", document_id, e)
+                # 500 不向客户端泄露内部细节，from None 切断异常链
+                raise HTTPException(
+                    status_code=500, detail="failed to clean vector store"
+                ) from None
 
-        await db.execute("DELETE FROM documents WHERE document_id=?", (document_id,))
-        await db.commit()
+            await db.execute("DELETE FROM documents WHERE document_id=?", (document_id,))
+            await db.commit()
     finally:
         await close_db(db)
 

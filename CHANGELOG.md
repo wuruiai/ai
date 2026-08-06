@@ -20,6 +20,10 @@
 - **SSE 孤儿任务修复（G9.3）**：SSE 生成器在 `finally` 统一取消并回收 orchestrator
   后台任务——客户端断开（`GeneratorExit`，不被 `except Exception` 捕获）不再留下孤儿
   任务继续占用连接、消耗 LLM 额度；`unified-chat` 流式端点同样包成可取消 task。
+- **幽灵向量竞态修复（G9.4）**：摄取 INDEXING 与文档删除共享一个
+  `document_write_lock`（`asyncio.Lock`）互斥——删除的"清向量 → 删 DB 行"不会插入到
+  摄取的向量写入中间；摄取在锁内重查文档仍存在，删除一旦提交则中止写入并回滚。
+  并发删除不再产生"DB 已删、向量残留"的幽灵结果。
 
 ## [1.1.0] - 2026-08-06
 

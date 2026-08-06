@@ -146,4 +146,9 @@ class VectorStore:
         return await asyncio.to_thread(self._collection.count)
 
 
+# 摄取(INDEXING)与删除对 Chroma 的互斥写锁（G9.4）
+# 锁住"检查文档仍存在 → 写向量"与"清向量 → 删 DB 行"两个关键段，杜绝并发删除时
+# 摄取仍在写入所产生的幽灵向量。单进程默认部署用内存锁；多 worker 需换分布式锁（Redis）。
+document_write_lock = asyncio.Lock()
+
 vector_store = VectorStore()
