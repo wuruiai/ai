@@ -100,6 +100,12 @@ class Settings(BaseSettings):
     SOURCE_PATH: str = "./data/source"
     LOG_PATH: str = "./data/logs"
     BACKUP_PATH: str = "./data/backups"
+    # 备份自动化（G5.2）：定时任务/计划程序运行时跳过、保留天数
+    BACKUP_ENABLED: bool = True
+    BACKUP_RETENTION_DAYS: int = 7
+
+    # 跨进程状态后端（G5.3）：留空用内存实现（单进程）；填 redis:// 换 Redis
+    REDIS_URL: str = ""
 
     # 摄取任务持久化队列（G4.1）
     # 应用进程内跑一个 asyncio worker（本地默认）；生产可另起 scripts.worker 多进程

@@ -3,37 +3,17 @@
 调用预算管理。
 
 Reference: §4.8
+
+单进程用内存后端；设 `REDIS_URL` 后工厂返回 Redis 后端（跨进程共享计数）。
+public 名字 `BudgetManager` 保留（即内存实现），模块单例 `budget_manager` 走工厂。
 """
 
-from collections import defaultdict
-from datetime import date
+from __future__ import annotations
 
-from fastapi import HTTPException
+from backend.core.backends import InMemoryBudgetBackend, get_budget_backend
 
-from backend.config import settings
+# 兼容旧引用：BudgetManager 即内存预算后端
+BudgetManager = InMemoryBudgetBackend
 
-
-class BudgetManager:
-    """预算管理器"""
-
-    def __init__(self):
-        self._daily_calls: dict[str, int] = defaultdict(int)
-        self._current_date: date = date.today()
-
-    def check_budget(self):
-        """检查预算"""
-        today = date.today()
-        if today != self._current_date:
-            self._daily_calls.clear()
-            self._current_date = today
-
-        total = sum(self._daily_calls.values())
-        if total >= settings.DAILY_CALL_LIMIT:
-            raise HTTPException(status_code=429, detail="Daily call limit exceeded")
-
-    def record_call(self, model: str):
-        """记录调用"""
-        self._daily_calls[model] += 1
-
-
-budget_manager = BudgetManager()
+# 模块单例：REDIS_URL 非空时自动换 Redis 后端
+budget_manager = get_budget_backend()

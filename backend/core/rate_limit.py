@@ -1,37 +1,28 @@
 """每用户滑动窗口限流。
 
-内存实现（单进程够用）；多 worker 部署时建议换 Redis。
+单进程用内存后端；设 `REDIS_URL` 后工厂返回 Redis 后端（跨进程共享计数）。
+public 名字 `RateLimiter` 保留（即内存实现），模块单例 `rate_limiter` 走工厂。
 """
 
 from __future__ import annotations
 
 import time
-from collections import defaultdict, deque
+from collections import defaultdict
 
 from fastapi import Depends, HTTPException
 
 from backend.api.v1.auth import CurrentUser, get_current_user
 from backend.config import settings
+from backend.core.backends import (
+    InMemoryRateLimitBackend,
+    get_rate_limit_backend,
+)
 
+# 兼容旧引用：RateLimiter 即内存限流后端
+RateLimiter = InMemoryRateLimitBackend
 
-class RateLimiter:
-    def __init__(self, limit: int = 30, window_s: int = 60):
-        self.limit = limit
-        self.window_s = window_s
-        self._hits: dict[str, deque] = defaultdict(deque)
-
-    def allow(self, key: str) -> bool:
-        now = time.monotonic()
-        q = self._hits[key]
-        while q and now - q[0] >= self.window_s:
-            q.popleft()
-        if len(q) >= self.limit:
-            return False
-        q.append(now)
-        return True
-
-
-rate_limiter = RateLimiter(limit=settings.RATE_LIMIT_PER_MINUTE, window_s=60)
+# 模块单例：REDIS_URL 非空时自动换 Redis 后端
+rate_limiter = get_rate_limit_backend(settings.RATE_LIMIT_PER_MINUTE, 60)
 
 
 def check_rate_limit(user: CurrentUser = Depends(get_current_user)) -> None:
