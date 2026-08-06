@@ -5,7 +5,8 @@
 
 抽象：
     RateLimitBackend.allow(key) -> bool   滑动窗口限流
-    BudgetBackend.check_budget()/record_call(model)   每日调用预算
+    BudgetBackend.check_budget(user_id)/record_call(user_id, model)
+                                         每日调用预算（按用户计数）
 
 工厂：
     get_rate_limit_backend(limit, window_s)
@@ -36,8 +37,8 @@ class RateLimitBackend(Protocol):
 
 
 class BudgetBackend(Protocol):
-    def check_budget(self) -> None: ...
-    def record_call(self, model: str) -> None: ...
+    def check_budget(self, user_id: str) -> None: ...
+    def record_call(self, user_id: str, model: str) -> None: ...
 
 
 # ---------------------------------------------------------------------------
@@ -103,24 +104,29 @@ class RedisRateLimitBackend:
 
 
 class InMemoryBudgetBackend:
-    """每日调用预算（单进程内存；换天自动清零）。"""
+    """每日调用预算（单进程内存；按用户计数，换天自动清零）。
+
+    `_daily_calls[user_id][model]` 记录每用户每模型的调用次数；
+    `DAILY_CALL_LIMIT` 是每用户每日总调用上限。
+    """
 
     def __init__(self) -> None:
-        self._daily_calls: dict[str, int] = defaultdict(int)
+        self._daily_calls: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
         self._current_date: date = date.today()
 
-    def check_budget(self) -> None:
+    def check_budget(self, user_id: str) -> None:
         today = date.today()
         if today != self._current_date:
             self._daily_calls.clear()
             self._current_date = today
 
-        total = sum(self._daily_calls.values())
+        # .get 读取，避免 check 时把未调用过的用户写进计数表
+        total = sum(self._daily_calls.get(user_id, {}).values())
         if total >= settings.DAILY_CALL_LIMIT:
             raise HTTPException(status_code=429, detail="Daily call limit exceeded")
 
-    def record_call(self, model: str) -> None:
-        self._daily_calls[model] += 1
+    def record_call(self, user_id: str, model: str) -> None:
+        self._daily_calls[user_id][model] += 1
 
 
 # ---------------------------------------------------------------------------
@@ -129,7 +135,10 @@ class InMemoryBudgetBackend:
 
 
 class RedisBudgetBackend:
-    """Redis 每日调用预算（key = `budget:{date}`，TTL 1 天）。"""
+    """Redis 每日调用预算（key = `budget:{date}:{user_id}`，TTL 1 天）。
+
+    按用户隔离计数，多 worker/多实例共享；`DAILY_CALL_LIMIT` 是每用户每日上限。
+    """
 
     def __init__(self, client: object | None = None) -> None:
         self._redis = client if client is not None else _redis_client()
@@ -138,13 +147,17 @@ class RedisBudgetBackend:
     def _date() -> str:
         return date.today().isoformat()
 
-    def check_budget(self) -> None:
-        total = int(self._redis.get(f"budget:{self._date()}") or 0)
+    @staticmethod
+    def _key(date_str: str, user_id: str) -> str:
+        return f"budget:{date_str}:{user_id}"
+
+    def check_budget(self, user_id: str) -> None:
+        total = int(self._redis.get(self._key(self._date(), user_id)) or 0)
         if total >= settings.DAILY_CALL_LIMIT:
             raise HTTPException(status_code=429, detail="Daily call limit exceeded")
 
-    def record_call(self, model: str) -> None:
-        key = f"budget:{self._date()}"
+    def record_call(self, user_id: str, model: str) -> None:
+        key = self._key(self._date(), user_id)
         self._redis.incr(key)
         self._redis.expire(key, 86400)
 

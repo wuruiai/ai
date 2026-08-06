@@ -31,3 +31,6 @@ class WaterExpertState(MessagesState):
 
     # 降级标记
     fallback_used: bool = False
+
+    # 用量记账：由 chat.py / unified_chat 注入的 LLM token 回调（UsageCollector 等）
+    llm_callbacks: Any = None

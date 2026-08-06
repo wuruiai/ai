@@ -32,7 +32,7 @@ async def classify_query_node(state: WaterExpertState) -> dict[str, Any]:
 
 async def generate_direct_node(state: WaterExpertState) -> dict[str, Any]:
     """直接生成回答（通用问题）"""
-    llm = ModelFactory.create_llm(temperature=0.7)
+    llm = ModelFactory.create_llm(temperature=0.7, callbacks=state.get("llm_callbacks"))
     messages = state.get("messages", [])
 
     # 构建系统提示
@@ -67,7 +67,7 @@ async def generate_direct_node(state: WaterExpertState) -> dict[str, Any]:
 
 async def generate_with_context_node(state: WaterExpertState) -> dict[str, Any]:
     """带上下文生成回答"""
-    llm = ModelFactory.create_llm(temperature=0.7)
+    llm = ModelFactory.create_llm(temperature=0.7, callbacks=state.get("llm_callbacks"))
     messages = state.get("messages", [])
 
     # 构建系统提示

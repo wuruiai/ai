@@ -4,6 +4,17 @@
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 版本单一来源：`backend/__init__.py.__version__`（config 与 pyproject.toml 同源派生）。
 
+## [Unreleased]
+
+### Fixed
+
+- **统一入口成本闭环（G9.1）**：预算改为**每用户计数**（`DAILY_CALL_LIMIT` 即每用户每日
+  调用上限），内存/Redis 后端均按 `user_id` 隔离；`unified-chat` 流式端点补齐预算拦截，
+  非流式端点补齐预算拦截 + LLM 用量记账（此前两个端点完全绕过成本控制）。
+- **三 Agent 用量全记账**：`document_analysis`、`water_expert` 的 LLM 调用接入
+  `llm_callbacks` 用量链，与 `knowledge_qa` 一致——任意 Agent / 任意入口的 token 用量
+  都落 `llm_usage` 表，成本可见无死角。
+
 ## [1.1.0] - 2026-08-06
 
 企业级优化发布：在 1.0.0 基础版本之上完成 8 轮工程化改造

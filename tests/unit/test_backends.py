@@ -151,20 +151,46 @@ def test_redis_rate_limit_sliding_window(monkeypatch):
 def test_budget_in_memory_under_and_over(monkeypatch):
     bm = InMemoryBudgetBackend()
     monkeypatch.setattr(settings, "DAILY_CALL_LIMIT", 2)
-    bm.check_budget()  # 0 < 2 不抛
-    bm.record_call("qwen-plus")
-    bm.record_call("qwen-max")
+    bm.check_budget("u1")  # 0 < 2 不抛
+    bm.record_call("u1", "qwen-plus")
+    bm.record_call("u1", "qwen-max")
     with pytest.raises(HTTPException) as ei:
-        bm.check_budget()  # 2 >= 2 → 429
+        bm.check_budget("u1")  # 2 >= 2 → 429
     assert ei.value.status_code == 429
+
+
+def test_budget_in_memory_per_user_isolation(monkeypatch):
+    """内存预算按用户隔离：A 超限不影响 B。"""
+    bm = InMemoryBudgetBackend()
+    monkeypatch.setattr(settings, "DAILY_CALL_LIMIT", 2)
+    bm.record_call("alice", "qwen-plus")
+    bm.record_call("alice", "qwen-max")
+    with pytest.raises(HTTPException):
+        bm.check_budget("alice")
+    bm.check_budget("bob")  # 不同用户不受影响
+    bm.record_call("bob", "qwen-plus")
+    assert bm._daily_calls["bob"]["qwen-plus"] == 1
 
 
 def test_budget_redis_shared_counter(monkeypatch):
     monkeypatch.setattr(settings, "DAILY_CALL_LIMIT", 2)
     bb = RedisBudgetBackend(client=_FakeRedis())
-    bb.check_budget()  # 0 < 2 不抛
-    bb.record_call("qwen-plus")
-    bb.record_call("qwen-plus")
+    bb.check_budget("u1")  # 0 < 2 不抛
+    bb.record_call("u1", "qwen-plus")
+    bb.record_call("u1", "qwen-plus")
     with pytest.raises(HTTPException) as ei:
-        bb.check_budget()  # 2 >= 2 → 429
+        bb.check_budget("u1")  # 2 >= 2 → 429
     assert ei.value.status_code == 429
+
+
+def test_budget_redis_per_user_isolation(monkeypatch):
+    """Redis 预算 key 含 user_id：A 超限不影响 B。"""
+    monkeypatch.setattr(settings, "DAILY_CALL_LIMIT", 2)
+    bb = RedisBudgetBackend(client=_FakeRedis())
+    bb.record_call("alice", "qwen-plus")
+    bb.record_call("alice", "qwen-plus")
+    with pytest.raises(HTTPException):
+        bb.check_budget("alice")
+    bb.check_budget("bob")  # 不同用户 key 不共享计数
+    bb.record_call("bob", "qwen-plus")
+    assert bb._redis.get(f"budget:{bb._date()}:bob") == "1"

@@ -3,6 +3,7 @@
 调用预算管理。
 
 
+预算按用户计数（`DAILY_CALL_LIMIT` 是每用户每日调用上限），接口需传 user_id。
 单进程用内存后端；设 `REDIS_URL` 后工厂返回 Redis 后端（跨进程共享计数）。
 public 名字 `BudgetManager` 保留（即内存实现），模块单例 `budget_manager` 走工厂。
 """

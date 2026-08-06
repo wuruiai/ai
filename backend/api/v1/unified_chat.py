@@ -21,9 +21,12 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from backend.api.v1.auth import CurrentUser, get_current_user
+from backend.config import settings
+from backend.core.budget import budget_manager
 from backend.core.logger import get_logger
 from backend.core.orchestrator import (
     AgentRequest,
+    AgentResponse,
     AgentType,
     get_orchestrator,
 )
@@ -138,6 +141,8 @@ async def unified_chat_stream(
     _rl: None = Depends(check_rate_limit),
 ) -> StreamingResponse:
     """统一聊天流。"""
+    # 每日调用限额（DAILY_CALL_LIMIT，每用户）：超限直接 429，不再消耗云额度
+    budget_manager.check_budget(user.user_id)
     orchestrator = get_orchestrator()
 
     async def generate() -> AsyncIterator[str]:
@@ -180,6 +185,9 @@ async def unified_chat_stream(
             # G3.1：token 用量落库（flush 内部兜底，失败/异常不影响回复）
             await usage_collector.flush(user.user_id, agent_type=request.agent_type)
 
+        # 完成一次 orchestrator 调用即计入当日额度（每用户）
+        budget_manager.record_call(user.user_id, settings.LLM_MODEL)
+
         if not response.success:
             yield create_error_event(response.error_msg or "AGENT_ERROR", "agent failed").format()
             return
@@ -219,16 +227,41 @@ async def unified_chat(
     _rl: None = Depends(check_rate_limit),
 ):
     """统一聊天（非流式）。"""
+    # 每日调用限额（DAILY_CALL_LIMIT，每用户）：超限直接 429，不再消耗云额度
+    budget_manager.check_budget(user.user_id)
+
     orchestrator = get_orchestrator()
     # 多轮记忆：与流式端点一致，加载历史注入 context（仅当前用户）
     history = await _load_history(request.session_id, limit=6, user_id=user.user_id)
+    # G9.1 用量记账：与流式端点一致，经 llm_callbacks 收集 token，请求结束落库
+    usage_collector = UsageCollector()
     agent_request = AgentRequest(
         user_id=user.user_id,
         session_id=request.session_id,
         agent_type=request.agent_type,
         user_message=request.message,
-        context={**request.context, "pipeline_key": request.pipeline_key, "history": history},
+        context={
+            **request.context,
+            "pipeline_key": request.pipeline_key,
+            "history": history,
+            "llm_callbacks": [usage_collector],
+        },
         pipeline_mode=request.pipeline_mode,
     )
-    response = await orchestrator.handle(agent_request)
+    try:
+        response = await orchestrator.handle(agent_request)
+    except Exception as e:
+        logger.exception("orchestrator crashed")
+        response = AgentResponse(
+            success=False,
+            agent_type=request.agent_type,
+            content="系统处理请求时遇到问题，请稍后再试。",
+            error_msg=str(e),
+        )
+    finally:
+        # G9.1：token 用量落库（flush 内部兜底，失败/异常不影响回复）
+        await usage_collector.flush(user.user_id, agent_type=request.agent_type)
+
+    # 完成一次 orchestrator 调用即计入当日额度（每用户）
+    budget_manager.record_call(user.user_id, settings.LLM_MODEL)
     return response

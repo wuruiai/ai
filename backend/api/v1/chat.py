@@ -220,8 +220,8 @@ async def chat_stream(
     """
     query = req.query
     thread_id = req.thread_id
-    # 每日调用限额（DAILY_CALL_LIMIT）：超限直接 429，不再消耗云额度
-    budget_manager.check_budget()
+    # 每日调用限额（DAILY_CALL_LIMIT，每用户）：超限直接 429，不再消耗云额度
+    budget_manager.check_budget(user.user_id)
     orch = get_orchestrator()
 
     async def generate() -> AsyncIterator[str]:
@@ -297,8 +297,8 @@ async def chat_stream(
             logger.exception("orchestrator crashed")
             yield create_error_event("ORCHESTRATOR_ERROR", str(e)).format()
             return
-        # 完成一次 orchestrator 调用即计入当日额度
-        budget_manager.record_call(settings.LLM_MODEL)
+        # 完成一次 orchestrator 调用即计入当日额度（每用户）
+        budget_manager.record_call(user.user_id, settings.LLM_MODEL)
         # G3.1: token 用量落库（flush 内部已兜底，失败不影响回复）
         await usage_collector.flush(user.user_id, agent_type="knowledge_qa")
 

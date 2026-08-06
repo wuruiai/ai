@@ -37,3 +37,6 @@ class DocumentAnalysisState(MessagesState):
     # 计数器
     step_count: int = 0
     llm_call_count: int = 0
+
+    # 用量记账：由 unified_chat 注入的 LLM token 回调（UsageCollector 等）
+    llm_callbacks: Any = None

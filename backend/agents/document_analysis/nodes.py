@@ -112,7 +112,7 @@ async def analyze_content(state: dict[str, Any]) -> dict[str, Any]:
         document_text = document_text[:6000] + "……"
 
     try:
-        llm = ModelFactory.create_llm(temperature=0.3)
+        llm = ModelFactory.create_llm(temperature=0.3, callbacks=state.get("llm_callbacks"))
         prompt = CONTENT_ANALYSIS_PROMPT.format(document=document_text, query=query)
         resp = await llm.ainvoke(prompt)
         analysis_text = resp.content
@@ -134,7 +134,7 @@ async def generate_summary(state: dict[str, Any]) -> dict[str, Any]:
     analysis = state.get("analysis", {})
     analysis_text = analysis.get("text", "")
     try:
-        llm = ModelFactory.create_llm(temperature=0.3)
+        llm = ModelFactory.create_llm(temperature=0.3, callbacks=state.get("llm_callbacks"))
         summary_resp = await llm.ainvoke(SUMMARY_PROMPT.format(analysis=analysis_text))
         summary = summary_resp.content[:2000]
 
