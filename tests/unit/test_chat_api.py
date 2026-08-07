@@ -109,6 +109,51 @@ async def test_sse_disconnect_cancels_orchestrator(monkeypatch):
     assert cancelled.wait(timeout=3), "客户端断开后 orchestrator 任务未被取消（孤儿）"
 
 
+async def test_sse_disconnect_still_flushes_usage(monkeypatch):
+    """G10.21：客户端断开（GeneratorExit）也会把该次 token 用量落库。
+
+    此前 usage_collector.flush 在 try/finally 之后，断开路径（GeneratorExit 不经
+    except，直接走 finally 后退出）永远跳过它——每次断流的调用 token 成本不记账。
+    收口到 finally 后，断开也必须触发 flush。
+    """
+    flushed: list[tuple[str, str]] = []
+
+    async def _fake_flush(self, user_id, agent_type="knowledge_qa"):
+        flushed.append((user_id, agent_type))
+
+    from backend.core.usage import UsageCollector
+
+    monkeypatch.setattr(UsageCollector, "flush", _fake_flush)
+
+    class _BlockingOrch:
+        async def handle(self, agent_req):
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                raise
+
+    async def _no_history(*a, **k):
+        return []
+
+    async def _no_save(*a, **k):
+        return "mid"
+
+    monkeypatch.setattr(chat_api, "_KEEPALIVE_S", 0.2)
+    monkeypatch.setattr(chat_api, "_load_history", _no_history)
+    monkeypatch.setattr(chat_api, "_save_user_message", _no_save)
+    monkeypatch.setattr(chat_api, "get_orchestrator", lambda: _BlockingOrch())
+    fake_user = chat_api.CurrentUser(user_id="u1", username="t", role="user")
+
+    gen = chat_api._chat_stream("水利工程是什么", "t1", fake_user)
+    buf = ""
+    while ": keep-alive" not in buf:
+        buf += await anext(gen)
+    await gen.aclose()
+
+    assert flushed, "客户端断开后 usage flush 未执行（成本记账缺口）"
+    assert flushed[0] == ("u1", "knowledge_qa")
+
+
 def test_chat_requires_auth():
     with TestClient(app) as c:
         r = c.post("/api/v1/chat/stream", json={"query": "x", "thread_id": "t"})

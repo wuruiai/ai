@@ -23,6 +23,11 @@
 
 ### Fixed
 
+- **用量：token 记账收口到 finally（G10.21）**：`/chat/stream` 的 `usage_collector.flush`
+  此前位于 try/finally 之后——客户端断开（GeneratorExit 不经过 except）或 orchestrator
+  崩溃（except 里 return）都会跳过落库，该次调用的 token 用量与成本不记账（每次断流请求
+  白白消耗预算额度）。flush 移入 finally，任何退出路径都落库（flush 内部已兜底，失败不影响
+  回复）。1 个回归测试。
 - **检索：citation 与生成证据同源对齐（G10.20）**：`/chat/stream` 的引用事件此前由
   chat.py 对 query 做**独立** top-3 检索生成，与 LLM 实际依据的证据（图内 rerank 后 top-8）
   不是同一批 chunk——答案里的 `[N]` 与引用面板对不上（来源错配/误导，且多一次检索调用）。

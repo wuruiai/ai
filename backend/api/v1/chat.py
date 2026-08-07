@@ -270,8 +270,10 @@ async def _chat_stream(query: str, thread_id: str, user: CurrentUser) -> AsyncIt
         # G10.7 M18：失败路径也记账——崩溃/异常同样消耗了 LLM 调用，
         # 若只在成功路径 record，攻击者可借持续触发错误绕过每日预算上限
         budget_manager.record_call(user.user_id, settings.LLM_MODEL)
-    # G3.1: token 用量落库（flush 内部已兜底，失败不影响回复）
-    await usage_collector.flush(user.user_id, agent_type="knowledge_qa")
+        # G10.21 用量收口：flush 移入 finally——此前在 finally 之后，客户端断开
+        # （GeneratorExit）或 orchestrator 崩溃（except 里 return）都会跳过，
+        # 该次调用的 token 用量不落库（成本记账缺口）。flush 内部已兜底，失败不影响回复。
+        await usage_collector.flush(user.user_id, agent_type="knowledge_qa")
 
     if not response.success:
         yield create_error_event(response.error_msg or "AGENT_ERROR", "agent failed").format()
