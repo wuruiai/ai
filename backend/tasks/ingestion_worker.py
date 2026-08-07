@@ -23,7 +23,7 @@ from backend.db.connection import close_db, get_connection
 from backend.rag.chunker import chunk_pages
 from backend.rag.embedding import get_embeddings
 from backend.rag.ids import generate_chunk_id
-from backend.rag.parser import parse_docx, parse_pdf
+from backend.rag.parser import parse_docx, parse_md, parse_pdf, parse_txt
 from backend.rag.vector_store import document_write_lock, vector_store
 
 logger = get_logger(__name__)
@@ -96,29 +96,16 @@ async def _rollback_chunks(document_id: str) -> None:
 
 
 async def _parse(file_path: Path) -> list[dict]:
-    """按扩展名分发到对应 parser。"""
+    """按扩展名分发到对应 parser（全部走线程池，读盘不阻塞事件循环）。"""
     ext = file_path.suffix.lower()
     if ext == ".pdf":
         return await parse_pdf(file_path)
     if ext == ".docx":
         return await parse_docx(file_path)
     if ext == ".txt":
-        # TXT：按行打页（每 50 行一页），简单但稳定
-        text = file_path.read_text(encoding="utf-8", errors="replace")
-        lines = text.splitlines()
-        pages: list[dict] = []
-        page_size = 50
-        for i in range(0, len(lines), page_size):
-            chunk_text = "\n".join(lines[i : i + page_size])
-            if chunk_text.strip():
-                pages.append({"page": len(pages) + 1, "content": chunk_text})
-        if not pages:
-            pages.append({"page": 1, "content": text})
-        return pages
+        return await parse_txt(file_path)
     if ext == ".md":
-        # MD：当作单页大文本（章节信息后续可加 heading 解析）
-        text = file_path.read_text(encoding="utf-8", errors="replace")
-        return [{"page": 1, "content": text}]
+        return await parse_md(file_path)
     raise ValueError(f"unsupported file type: {ext}")
 
 

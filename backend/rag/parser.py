@@ -48,3 +48,36 @@ def _parse_docx_sync(file_path: Path) -> list[dict]:
         if para.text.strip():
             paragraphs.append({"page": i + 1, "content": para.text})
     return paragraphs
+
+
+async def parse_txt(file_path: Path) -> list[dict]:
+    """解析 TXT 文件：按行打页（每 50 行一页），读盘走线程池避免阻塞事件循环。"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _parse_txt_sync, file_path)
+
+
+def _parse_txt_sync(file_path: Path) -> list[dict]:
+    """同步解析 TXT：按行打页（每 50 行一页），简单但稳定。"""
+    text = file_path.read_text(encoding="utf-8", errors="replace")
+    lines = text.splitlines()
+    pages: list[dict] = []
+    page_size = 50
+    for i in range(0, len(lines), page_size):
+        chunk_text = "\n".join(lines[i : i + page_size])
+        if chunk_text.strip():
+            pages.append({"page": len(pages) + 1, "content": chunk_text})
+    if not pages:
+        pages.append({"page": 1, "content": text})
+    return pages
+
+
+async def parse_md(file_path: Path) -> list[dict]:
+    """解析 MD 文件：单页大文本（章节信息后续可加 heading 解析）。"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _parse_md_sync, file_path)
+
+
+def _parse_md_sync(file_path: Path) -> list[dict]:
+    """同步解析 MD：当作单页大文本。"""
+    text = file_path.read_text(encoding="utf-8", errors="replace")
+    return [{"page": 1, "content": text}]

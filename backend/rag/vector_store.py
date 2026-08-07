@@ -11,11 +11,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings
 
 from backend.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 def silence_chroma_telemetry() -> None:
@@ -57,7 +60,7 @@ class VectorStore:
         embeddings: list[list[float]],
         metadatas: list[dict] | None = None,
     ):
-        """添加文档"""
+        """添加文档（G10.19：upsert 幂等 + 失败批量回滚）"""
         await asyncio.to_thread(self._add_documents, ids, documents, embeddings, metadatas)
 
     def _add_documents(
@@ -67,12 +70,24 @@ class VectorStore:
         embeddings: list[list[float]],
         metadatas: list[dict] | None = None,
     ):
-        self._collection.add(
-            ids=ids,
-            documents=documents,
-            embeddings=embeddings,
-            metadatas=metadatas,
-        )
+        try:
+            # upsert 而非 add：重摄取同 chunk_id 覆盖写入而非抛 DuplicateIDError 全批失败
+            self._collection.upsert(
+                ids=ids,
+                documents=documents,
+                embeddings=embeddings,
+                metadatas=metadatas,
+            )
+        except Exception:
+            # 部分写入回滚：批量删除本次 ids——Chroma 可能在失败前已落部分向量，
+            # 若只由调用方回滚 SQLite chunks，残留向量成孤儿（可检索但无源行）。
+            try:
+                self._collection.delete(ids=ids)
+            except Exception:
+                logger.warning(
+                    "rollback chroma vectors failed for %d ids: %s", len(ids), exc_info=True
+                )
+            raise
 
     async def query(
         self,
@@ -114,10 +129,7 @@ class VectorStore:
         return await asyncio.to_thread(self._delete_by_document, document_id, retries)
 
     def _delete_by_document(self, document_id: str, retries: int = 3) -> int:
-        import logging
         import time
-
-        logger = logging.getLogger(__name__)
 
         last_exc: Exception | None = None
         for attempt in range(1, retries + 1):

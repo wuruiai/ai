@@ -23,6 +23,12 @@
 
 ### Fixed
 
+- **摄取：TXT/MD 解析移出事件循环 + Chroma 幂等/回滚（G10.19）**：① `.txt`/`.md` 解析此前在
+  worker 协程里直接 `file.read_text()` 整读大文件——阻塞事件循环，PDF/DOCX 已走线程池唯独
+  这两个分支漏掉；现收敛到 `parser.parse_txt/parse_md`（同样 `run_in_executor`）。② Chroma
+  写入从 `add` 改为 `upsert`——重摄取同 `chunk_id` 覆盖写入而非抛 `DuplicateIDError` 全批
+  失败；③ 写入失败时按本次 `ids` 批量删除回滚——此前只回滚 SQLite chunks，Chroma 已写部分
+  向量成孤儿（可检索但无源行），现两边都不留孤儿。5 个回归测试。
 - **请求边界收紧（G10.16）**：① `chat/stream` 的 `query` 与 `unified-chat` 的 `message`
   补 `max_length=2000`——此前只限下界，超大查询可直接灌给 LLM 烧 token；② 文档上传
   补 `Content-Length` 预检——超大文件在 `file.read()`（整读进内存）之前就 413 拒绝，
