@@ -131,6 +131,10 @@ jobs:
       - name: Run smoke test
         if: ${{ env.DASHSCOPE_API_KEY != '' }}
         env:
+          # G10.26：ensure_secrets 在非 local 环境强制 TOKEN_SECRET + DASHSCOPE_API_KEY；
+          # smoke 用临时库 + 进程级随机 token（_runner 注入），设 local 仅豁免密钥强校验，
+          # DASHSCOPE_API_KEY 仍真实调用云端——语义吻合测试环境，避免为 CI 单配签名 secret。
+          APP_ENV: local
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
         run: python -m scripts.smoke_test
 

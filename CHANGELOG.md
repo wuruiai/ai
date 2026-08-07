@@ -23,6 +23,12 @@
 
 ### Fixed
 
+- **CI smoke job 配置 DashScope Key 后无法真实运行（G10.28）**：仓库配置
+  `DASHSCOPE_API_KEY` secret 后，smoke job 门控打开，但 `ensure_secrets()`（G10.18
+  fail-closed）在非 local 环境强制 `TOKEN_SECRET` + `DASHSCOPE_API_KEY` 双密钥，缺后者
+  后端拒启导致 smoke FAIL。修复：smoke job 显式设 `APP_ENV=local` 豁免密钥强校验
+  （smoke 用 `_runner` 注入的临时 SQLite/Chroma + 进程级随机 token，语义吻合测试环境），
+  `DASHSCOPE_API_KEY` 仍真实调用云端，避免为 CI 单配签名 secret。
 - **GitHub Actions 依赖 Node 20 弃用警告（G10.27）**：CI 各 job 的 action 升级到 Node 24
   运行时版本（`actions/checkout@v5`、`actions/setup-python@v6`、`actions/setup-node@v5`、
   `docker/setup-buildx-action@v4`、`docker/login-action@v4`、`docker/build-push-action@v7`），
