@@ -237,12 +237,27 @@ async def admin_audit(
 # 数据导出（CSV）
 # ---------------------------------------------------------------------------
 
+# 导出行数上限（G10.22）：管理员导出不设上限会把整库一次性读进内存拼 CSV——
+# 大库下内存暴涨/响应阻塞。超限只导出前 N 行（管理导出场景可接受截断）。
+_EXPORT_MAX_ROWS = 5000
+
+# CSV 公式注入防护（G10.22）：以 = + - @ 等开头的单元格会被 Excel/LibreOffice 当公式
+# 执行（DDE/公式注入，可外联数据甚至执行命令）。用户可控内容（消息/评论）进 CSV 前
+# 统一加单引号前缀使其按文本显示；首列与数字前的 '-' 尤其危险，全部兜底处理。
+_CSV_INJECTION_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _sanitize_csv_cell(value: str) -> str:
+    if value.startswith(_CSV_INJECTION_PREFIXES):
+        return "'" + value
+    return value
+
 
 def _csv_response(filename: str, header: list[str], rows: list[list]) -> Response:
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(header)
-    writer.writerows(rows)
+    writer.writerows([[_sanitize_csv_cell(c) for c in row] for row in rows])
     return Response(
         content=buf.getvalue(),
         media_type="text/csv; charset=utf-8",
@@ -254,13 +269,14 @@ def _csv_response(filename: str, header: list[str], rows: list[list]) -> Respons
 async def admin_export_threads(
     _admin: CurrentUser = Depends(require_admin),
 ) -> Response:
-    """导出全部对话记录为 CSV。"""
+    """导出对话记录为 CSV（上限 _EXPORT_MAX_ROWS 行，防大库整读内存）。"""
     db = await get_connection()
     try:
         async with db.execute(
             "SELECT m.created_at, u.username, m.thread_id, m.role, m.content "
             "FROM messages m LEFT JOIN users u ON u.id = m.user_id "
-            "ORDER BY m.created_at, m.rowid"
+            "ORDER BY m.created_at, m.rowid LIMIT ?",
+            (_EXPORT_MAX_ROWS,),
         ) as cur:
             rows = await cur.fetchall()
     finally:
@@ -276,7 +292,7 @@ async def admin_export_threads(
 async def admin_export_feedback(
     _admin: CurrentUser = Depends(require_admin),
 ) -> Response:
-    """导出反馈记录为 CSV。"""
+    """导出反馈记录为 CSV（上限 _EXPORT_MAX_ROWS 行，防大库整读内存）。"""
     db = await get_connection()
     try:
         async with db.execute(
@@ -284,7 +300,8 @@ async def admin_export_feedback(
             "FROM feedback f "
             "LEFT JOIN messages m ON m.message_id = f.message_id "
             "LEFT JOIN users u ON u.id = m.user_id "
-            "ORDER BY f.created_at"
+            "ORDER BY f.created_at LIMIT ?",
+            (_EXPORT_MAX_ROWS,),
         ) as cur:
             rows = await cur.fetchall()
     finally:

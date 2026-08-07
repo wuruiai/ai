@@ -65,3 +65,79 @@ def test_admin_user_management():
         self_id = admin["user"]["user_id"]
         r = c.patch(f"/api/v1/admin/users/{self_id}", json={"is_active": 0}, headers=h)
         assert r.status_code == 400
+
+
+def test_sanitize_csv_cell():
+    """G10.22：CSV 公式注入前缀（= + - @ 等）被单引号转义，普通文本原样保留。"""
+    from backend.api.v1 import admin as admin_api
+
+    assert admin_api._sanitize_csv_cell("=SUM(A1:A10)") == "'=SUM(A1:A10)"
+    assert admin_api._sanitize_csv_cell("+123") == "'+123"
+    assert admin_api._sanitize_csv_cell("-1") == "'-1"
+    assert admin_api._sanitize_csv_cell("@cmd") == "'@cmd"
+    assert admin_api._sanitize_csv_cell("\tTAB") == "'\tTAB"
+    assert admin_api._sanitize_csv_cell("普通文本") == "普通文本"
+
+
+def test_export_threads_sanitizes_formula_injection():
+    """G10.22：导出对话 CSV 对公式注入内容加单引号前缀，Excel 不再当公式执行（DDE）。"""
+    import sqlite3
+    import uuid
+
+    from backend.config import settings
+
+    def _seed(content: str) -> None:
+        conn = sqlite3.connect(settings.SQLITE_PATH)
+        try:
+            conn.execute(
+                "INSERT INTO messages (message_id, thread_id, role, content, user_id) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (str(uuid.uuid4()), "t_export", "user", content, "u_seed"),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    with TestClient(app) as c:
+        admin = _register(c, "csv_admin")
+        h = {"Authorization": f"Bearer {admin['token']}"}
+        _seed('=HYPERLINK("http://evil.example")')
+        r = c.get("/api/v1/admin/export/threads", headers=h)
+        assert r.status_code == 200
+        # 转义前缀 `'` 已加（否则 Excel 打开会当外联公式执行）
+        assert "'=HYPERLINK" in r.text
+        # 负断言：不能出现「未被转义的 = 紧跟引号」形态（csv 引号包裹后的原始单元格）
+        assert '"=HYPERLINK' not in r.text
+
+
+def test_export_threads_row_cap(monkeypatch):
+    """G10.22：导出行数上限——大库只导前 N 行（防整库读内存拼 CSV），N 可配。"""
+    import sqlite3
+    import uuid
+
+    from backend.api.v1 import admin as admin_api
+    from backend.config import settings
+
+    monkeypatch.setattr(admin_api, "_EXPORT_MAX_ROWS", 2)
+
+    def _seed() -> None:
+        conn = sqlite3.connect(settings.SQLITE_PATH)
+        try:
+            for i in range(3):
+                conn.execute(
+                    "INSERT INTO messages (message_id, thread_id, role, content, user_id) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (str(uuid.uuid4()), "t_cap", "user", f"内容{i}", "u_seed"),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+    with TestClient(app) as c:
+        admin = _register(c, "cap_admin")
+        h = {"Authorization": f"Bearer {admin['token']}"}
+        _seed()
+        r = c.get("/api/v1/admin/export/threads", headers=h)
+        assert r.status_code == 200
+        lines = [ln for ln in r.text.splitlines() if ln.strip()]
+        assert len(lines) == 1 + 2  # 表头 + 上限 2 行数据（共插 3 行）

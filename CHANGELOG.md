@@ -23,6 +23,12 @@
 
 ### Fixed
 
+- **管理端：feedback 限流 + CSV 公式注入防护 + 导出上限（G10.22）**：① 反馈接口此前
+  **没有** rate-limit 依赖（`/chat/stream` 有），攻击者可脚本化灌反馈逐条写库——
+  现补 `Depends(check_rate_limit)` 与聊天同规格限流；② 管理端 CSV 导出（threads/feedback）
+  用户可控内容（消息/评论）未转义——单元格以 `= + - @` 等开头时 Excel/LibreOffice 会当
+  公式执行（DDE/公式注入，可外联数据），现统一加单引号前缀按文本显示；③ 导出无行数上限，
+  大库整读内存拼 CSV 导致内存暴涨/响应阻塞——现 `_EXPORT_MAX_ROWS=5000` 截断。5 个回归测试。
 - **用量：token 记账收口到 finally（G10.21）**：`/chat/stream` 的 `usage_collector.flush`
   此前位于 try/finally 之后——客户端断开（GeneratorExit 不经过 except）或 orchestrator
   崩溃（except 里 return）都会跳过落库，该次调用的 token 用量与成本不记账（每次断流请求

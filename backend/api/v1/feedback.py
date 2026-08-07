@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from backend.api.v1.auth import CurrentUser, get_current_user
+from backend.core.rate_limit import check_rate_limit
 from backend.core.security import validate_origin
 from backend.db.connection import close_db, get_connection
 
@@ -50,6 +51,7 @@ async def submit_feedback(
     request: Request,
     feedback: FeedbackRequest,
     user: CurrentUser = Depends(get_current_user),
+    _rl: None = Depends(check_rate_limit),  # G10.22：反馈刷接口同样限流（防批量写库）
 ) -> dict:
     """提交反馈：外键校验 + 真插入。"""
     validate_origin(request)

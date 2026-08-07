@@ -86,3 +86,30 @@ def test_feedback_ownership_isolation():
             headers={"Authorization": f"Bearer {tokB}"},
         )
         assert r.status_code == 404
+
+
+def test_feedback_rate_limited(monkeypatch):
+    """G10.22：反馈接口与聊天同规格限流——窗口内超限抛 429（防刷反馈批量写库）。
+
+    回归点：feedback 端点此前无 rate-limit 依赖，攻击者可脚本化灌反馈（每条插一行
+    feedback 表）。若有人删掉 `Depends(check_rate_limit)`，此用例必红。
+    用独立内存后端而非改 settings——模块单例 `rate_limiter` 在 import 时已固化 limit。
+    """
+    from backend.core import rate_limit as rl_mod
+    from backend.core.backends import InMemoryRateLimitBackend
+
+    monkeypatch.setattr(rl_mod, "rate_limiter", InMemoryRateLimitBackend(limit=3, window_s=60))
+
+    with TestClient(app) as c:
+        tok, uid = _register(c, "rl_fb")
+        h = {"Authorization": f"Bearer {tok}"}
+        thread_id = "th_" + uuid.uuid4().hex[:8]
+        mid = _insert_message(thread_id, uid)
+        for _ in range(3):
+            r = c.post(
+                "/api/v1/feedback/", json={"message_id": mid, "rating": "helpful"}, headers=h
+            )
+            assert r.status_code == 200
+        # 窗口内第 4 次 → 429（依赖在端点体执行前拦截）
+        r = c.post("/api/v1/feedback/", json={"message_id": mid, "rating": "helpful"}, headers=h)
+        assert r.status_code == 429
