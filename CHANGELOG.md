@@ -23,6 +23,19 @@
 
 ### Fixed
 
+- **测试缺口：并发上传竞态 + knowledge_qa 图 + reranker（G10.25）**：三处此前无测试覆盖的
+  行为补齐回归用例。① **并发上传竞态**：两个同内容上传同时通过查重时，`INSERT OR IGNORE`
+  只有一个生效（rowcount=1），另一个 rowcount=0 走竞态清理路径——清理自己写的孤儿文件、
+  幂等返回权威记录、不重复入队；此前该路径只靠代码注释声明。用 pausing-proxy 让首个查重
+  SELECT 让出 50ms，确定性命中竞态分支（去掉 `OR IGNORE` 即复现 UNIQUE 冲突）。②
+  **knowledge_qa 图**：此前无任何图级测试——补齐条件路由纯函数（查询类型 5 类 + 未知兜底
+  GENERAL、置信度高/低）、端到端图执行（GENERAL→直答不检索；SPECIALIZED→检索→重排→RAG
+  生成带 citations，验证 G10.20 引用同源；低置信→直答不置降级标记）、节点级 rerank 失败降级
+  与 HyDE/多查询节点。③ **reranker**：DashScope 封装此前无测试——mock HTTP 断言请求体
+  （model/query/documents/top_n、显式 top_k 覆盖默认）、`output.results` 解析、403 抛
+  `HTTPStatusError`（调用方据此降级）、空输出返回空列表。另修一处**测试基建**：`_fresh_db`
+  删临时库遇到 Windows 文件锁竞态（前一测试连接关闭后 aiosqlite 后台线程仍持句柄数毫秒）
+  会偶发 PermissionError，现重试短窗口容忍瞬态锁（真泄漏仍会报错，不掩盖实泄漏）。
 - **数据层：连接池 _all 关闭 + scripts 关连接 + 备份/Redis/迁移原子化（G10.24）**：
   ① 连接池 `_all` 台账只跟踪存活连接——`release` 关闭连接即从 `_all` 摘除（此前
   只增不减，反复 acquire/release 后集合无限增长、`close()` 逐一重关死连接）；建连

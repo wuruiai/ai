@@ -1,5 +1,6 @@
 """文档 CRUD API 测试（mock 摄取，避免云端 embedding）。"""
 
+import asyncio
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -215,3 +216,148 @@ def test_cross_user_duplicate_leaves_no_orphan_file(monkeypatch):
 
         # 只有 A 的 a.txt 被引用；B 的 zz.txt 不得落盘
         assert _count_source_files(doc_id) == [f"{doc_id}_a.txt"]
+
+
+# ---------------------------------------------------------------------------
+# G10.25：并发上传竞态（两个同内容上传同时通过查重，INSERT OR IGNORE 决出赢家）
+# ---------------------------------------------------------------------------
+
+
+class _PauseResult:
+    """复刻 aiosqlite `execute` 的双协议（awaitable + async ctx mgr）。
+
+    首个命中 `file_hash=?` 的 SELECT（查重）让出 50ms——修复/行为依据：
+    upload_document 用 `INSERT OR IGNORE`（document_id 即 file_hash）保证并发同内容
+    上传只有一个 INSERT 生效，第二个 rowcount=0 走竞态清理路径。让出窗口让两个
+    请求都先通过查重、再先后 INSERT，确定性命中该竞态分支。
+    """
+
+    def __init__(self, inner, sql, args, kwargs, gate):
+        self._inner = inner
+        self._sql = sql
+        self._args = args
+        self._kwargs = kwargs
+        self._gate = gate
+        self._ctx = None
+
+    async def _start(self):
+        self._ctx = self._inner.execute(self._sql, *self._args, **self._kwargs)
+        cur = await self._ctx.__aenter__()
+        if not self._gate["paused"] and "file_hash=?" in self._sql:
+            self._gate["paused"] = True
+            await asyncio.sleep(0.05)
+        return cur
+
+    def __await__(self):
+        return self._start().__await__()
+
+    async def __aenter__(self):
+        return await self._start()
+
+    async def __aexit__(self, *exc):
+        if self._ctx is not None:
+            return await self._ctx.__aexit__(*exc)
+        return False
+
+
+class _ConnProxy:
+    def __init__(self, inner, gate):
+        self._inner = inner
+        self._gate = gate
+
+    def execute(self, sql, *args, **kwargs):
+        return _PauseResult(self._inner, sql, args, kwargs, self._gate)
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+async def test_concurrent_same_content_upload_creates_single_row(monkeypatch):
+    """G10.25：两个同内容上传并发——仅一行文档、一个落盘文件、一次入队。
+
+    竞态：两个请求都通过查重后，INSERT OR IGNORE 只有一个 rowcount=1 生效；
+    另一个 rowcount=0 走竞态清理路径——清理自己写的孤儿文件、幂等返回权威记录、
+    不再重复入队。此前该路径无测试，靠代码注释声明行为。
+    """
+    from io import BytesIO
+
+    from starlette.datastructures import UploadFile
+    from starlette.requests import Request
+
+    from backend.api.v1.auth import CurrentUser
+    from backend.db.connection import close_db
+    from backend.db.connection import get_connection as raw_get_connection
+    from backend.db.migrations import migrate
+
+    # 直接调路由不经过 TestClient lifespan：先建表
+    db = await raw_get_connection()
+    try:
+        await migrate(db)
+    finally:
+        await close_db(db)
+
+    enqueued: list[str] = []
+
+    async def _spy_spawn_ingestion(document_id: str):
+        enqueued.append(document_id)
+
+    monkeypatch.setattr(doc_api, "_spawn_ingestion", _spy_spawn_ingestion)
+
+    # 竞态门：首个查重 SELECT 让出 50ms，制造"双双通过查重"窗口
+    gate = {"paused": False}
+
+    async def _proxied_get_connection():
+        inner = await raw_get_connection()
+        return _ConnProxy(inner, gate)
+
+    monkeypatch.setattr(doc_api, "get_connection", _proxied_get_connection)
+
+    content = b"concurrent upload race content"
+    user = CurrentUser(user_id="u_race", username="race_user", role="user")
+
+    def _scope() -> dict:
+        return {
+            "type": "http",
+            "http_version": "1.1",
+            "method": "POST",
+            "path": "/api/v1/documents/",
+            "raw_path": b"/api/v1/documents/",
+            "query_string": b"",
+            "scheme": "http",
+            "server": ("testserver", 80),
+            "client": ("testclient", 123),
+            "headers": [],
+        }
+
+    req_a = Request(_scope())
+    req_b = Request(_scope())
+    file_a = UploadFile(file=BytesIO(content), filename="a.txt")
+    file_b = UploadFile(file=BytesIO(content), filename="b.txt")
+
+    r1, r2 = await asyncio.gather(
+        doc_api.upload_document(request=req_a, file=file_a, user=user),
+        doc_api.upload_document(request=req_b, file=file_b, user=user),
+    )
+    await file_a.close()
+    await file_b.close()
+
+    # 两个请求都幂等返回同一 document_id
+    assert r1.document_id == r2.document_id
+    doc_id = r1.document_id
+    assert r1.status == "pending" and r2.status == "pending"
+
+    # 仅一行文档记录
+    db = await raw_get_connection()
+    try:
+        async with db.execute("SELECT COUNT(*) FROM documents WHERE file_hash=?", (doc_id,)) as cur:
+            n = (await cur.fetchone())[0]
+    finally:
+        await close_db(db)
+    assert n == 1
+
+    # 仅一次入队：竞态失败方走 rowcount==0 清理路径，不重复入队
+    assert enqueued == [doc_id]
+
+    # 无孤儿文件：失败方写的 {hash}_b.txt 已被清理，只留权威记录引用的一个
+    files = _count_source_files(doc_id)
+    assert len(files) == 1

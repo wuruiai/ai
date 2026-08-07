@@ -6,6 +6,7 @@ pydantic-settings 会在 settings 单例首次读取时固化配置。
 
 import os
 import tempfile
+import time
 from pathlib import Path
 
 import pytest
@@ -46,7 +47,15 @@ def _fresh_db():
         Path(settings.SQLITE_PATH + "-wal"),
         Path(settings.SQLITE_PATH + "-shm"),
     ):
-        p.unlink(missing_ok=True)
+        # Windows 文件锁竞态：前一测试的 aiosqlite 连接关闭后，其后台线程可能
+        # 还持有句柄数毫秒，立即 unlink 会 PermissionError。重试短窗口容忍瞬态
+        # 锁；真正泄漏的连接（从不关闭）重试耗尽后仍报错——不掩盖实泄漏。
+        for _ in range(20):
+            try:
+                p.unlink(missing_ok=True)
+                break
+            except PermissionError:
+                time.sleep(0.05)
     # 登录防爆破 / 注册限流是进程级内存状态，逐测试清空，避免跨用例累计
     login_throttle._failures.clear()
     login_throttle._lockout_until.clear()
