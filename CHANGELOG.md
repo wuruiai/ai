@@ -23,6 +23,12 @@
 
 ### Fixed
 
+- **认证：admin bootstrap 原子化（G10.23）**：`register` 判定"首个注册者成为 admin"是
+  check-then-act——两个并发注册可同时读到 `admin_count=0`，双双以 admin 身份插入
+  （首个 admin 席位被"先到先得"抢占，开放注册下等于先注册先夺权）。现包一层
+  `BEGIN IMMEDIATE` 把"查-判-插"整体串行化：后到者阻塞至首个 admin 提交（busy_timeout
+  等锁），再查 count 已为 1 → 自动降为普通用户；用户名冲突 409 路径显式 rollback 立即
+  释放写锁。1 个并发回归测试（去掉 BEGIN IMMEDIATE 即复现双 admin）。
 - **管理端：feedback 限流 + CSV 公式注入防护 + 导出上限（G10.22）**：① 反馈接口此前
   **没有** rate-limit 依赖（`/chat/stream` 有），攻击者可脚本化灌反馈逐条写库——
   现补 `Depends(check_rate_limit)` 与聊天同规格限流；② 管理端 CSV 导出（threads/feedback）

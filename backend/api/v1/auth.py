@@ -329,6 +329,12 @@ async def register(req: RegisterRequest, request: Request) -> dict:
 
     db = await get_connection()
     try:
+        # G10.23 admin bootstrap 原子化：并发注册同时读到 admin_count==0 会双双成为
+        # admin（check-then-act TOCTOU，首个 admin 席位可被"先到先得"抢占）。
+        # BEGIN IMMEDIATE 立即取写锁，把"查-判-插"整体串行化：后到者阻塞至首个 admin
+        # 提交（busy_timeout 5s 内等锁），再查 count 已为 1 → 自动降为普通用户。
+        # WAL 下读写不互斥，此写锁不影响并发读取。
+        await db.execute("BEGIN IMMEDIATE")
         # 排除 v1 遗留的 local 种子用户：首个"注册"用户才成为管理员
         async with db.execute(
             "SELECT COUNT(*) FROM users WHERE role='admin' AND username != 'local'"
@@ -355,8 +361,11 @@ async def register(req: RegisterRequest, request: Request) -> dict:
             )
             await db.commit()
         except Exception as e:
+            # 用户名冲突对客户端是确定的 409；from None 不把 DB 异常链带给响应。
+            # 显式 rollback 立即释放 BEGIN IMMEDIATE 拿到的写锁——若等 close_db 归还
+            # 连接时才回滚，并发注册会在这个事务上白白等待到 busy_timeout。
+            await db.rollback()
             if "UNIQUE" in str(e):
-                # 用户名冲突对客户端是确定的 409；from None 不把 DB 异常链带给响应
                 raise HTTPException(status_code=409, detail="username already exists") from None
             raise
     finally:

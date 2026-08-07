@@ -3,8 +3,12 @@
 覆盖 G1.1 登录防爆破 / G1.2 标准 JWT + refresh + logout / G1.4 token_version 立即失效。
 """
 
+import asyncio
+
+from fastapi import Request
 from fastapi.testclient import TestClient
 
+from backend.api.v1.auth import RegisterRequest, register
 from backend.main import app
 
 
@@ -240,6 +244,97 @@ def test_login_lockout_scoped_to_source_ip():
         )
         assert r.status_code == 200
         assert r.json()["access_token"]
+
+
+async def test_admin_bootstrap_atomic_under_concurrent_register(monkeypatch):
+    """G10.23：并发注册同时读到 admin_count=0 时，首个 admin 席位只被一人抢占。
+
+    未修复时 register 是 check-then-act：两个并发请求都在对方提交前 SELECT 到
+    admin_count=0，双双以 admin 身份 INSERT → 两个 admin（首个席位被抢占）。
+    修复后 BEGIN IMMEDIATE 把"查-判-插"串行化：后到者阻塞至首个 admin 提交
+    （busy_timeout 等锁），再查 count 已为 1 → 自动降为普通用户。
+
+    测试用代理连接在 admin-count SELECT 完成后让出事件循环（await asyncio.sleep），
+    把竞态窗口从微秒级拉到显式调度点——未修复代码必现双 admin，修复代码因写锁
+    串行必然只产出一个 admin。直接并发调用 register 协程（绕过 HTTP 层）便于确定性交错。
+    """
+    from backend.api.v1 import auth as auth_api
+    from backend.db.connection import close_db
+    from backend.db.connection import get_connection as _real_get_connection
+    from backend.db.migrations import migrate
+
+    # 直接调 register 协程不走 app lifespan，先显式建表
+    db = await _real_get_connection()
+    try:
+        await migrate(db)
+    finally:
+        await close_db(db)
+
+    class _PausingResult:
+        """复刻 aiosqlite `Connection.execute` 的返回协议：既 awaitable 又是 async
+        上下文管理器（`await db.execute()` 与 `async with db.execute()` 两种用法并存）。
+        进入时把 admin-count SELECT 的完成推迟 50ms——让两个并发注册都先读到 0。"""
+
+        def __init__(self, inner, sql, args, kwargs):
+            self._inner = inner
+            self._sql = sql
+            self._args = args
+            self._kwargs = kwargs
+            self._ctx = None
+
+        async def _start(self):
+            self._ctx = self._inner.execute(self._sql, *self._args, **self._kwargs)
+            cur = await self._ctx.__aenter__()
+            if "SELECT COUNT(*) FROM users WHERE role='admin'" in self._sql:
+                await asyncio.sleep(0.05)
+            return cur
+
+        def __await__(self):
+            return self._start().__await__()
+
+        async def __aenter__(self):
+            return await self._start()
+
+        async def __aexit__(self, *exc):
+            if self._ctx is not None:
+                return await self._ctx.__aexit__(*exc)
+            return False
+
+    class _PausingConn:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def execute(self, sql, *args, **kwargs):
+            return _PausingResult(self._inner, sql, args, kwargs)
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+    async def _pausing_conn():
+        return _PausingConn(await _real_get_connection())
+
+    monkeypatch.setattr(auth_api, "get_connection", _pausing_conn)
+
+    def _http_request() -> Request:
+        # 无 Origin → validate_origin 放行；client=testclient（可信代理）→ _client_ip 取直连地址
+        return Request(
+            {
+                "type": "http",
+                "method": "POST",
+                "path": "/api/v1/auth/register",
+                "headers": [],
+                "client": ("testclient", 50000),
+            }
+        )
+
+    req_a = _http_request()
+    req_b = _http_request()
+    results = await asyncio.gather(
+        register(RegisterRequest(username="race_admin", password="pass123456"), req_a),  # noqa: S106
+        register(RegisterRequest(username="race_user", password="pass123456"), req_b),  # noqa: S106
+    )
+    roles = [r["user"]["role"] for r in results]
+    assert roles.count("admin") == 1, f"并发注册应恰好一个 admin，实际 roles={roles}"
 
 
 def test_register_rate_limited_by_ip():
