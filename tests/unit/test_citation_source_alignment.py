@@ -44,7 +44,16 @@ async def test_generate_rag_citations_match_prompt_evidence(monkeypatch):
 
     assert len(out["citations"]) == 8
     assert [c["index"] for c in out["citations"]] == [1, 2, 3, 4, 5, 6, 7, 8]
-    assert [c["source_id"] for c in out["citations"]] == ["c0", "c1", "c2", "c3", "c4", "c5", "c6", "c7"]
+    assert [c["source_id"] for c in out["citations"]] == [
+        "c0",
+        "c1",
+        "c2",
+        "c3",
+        "c4",
+        "c5",
+        "c6",
+        "c7",
+    ]
     assert [c["page"] for c in out["citations"]] == [0, 1, 2, 3, 4, 5, 6, 7]
 
     # 系统提示含第 1 与第 8 条证据（[1]/[8]），与 citations 一一对应；9、10 未截入
