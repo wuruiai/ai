@@ -8,6 +8,9 @@
 
 ### Added
 
+- **README CI 状态徽章（G10.29）**：README 标题下新增 GitHub Actions 徽章（`ci.yml` /
+  `branch=main`），实时展示主干 CI 绿/红状态，点击直达 Actions 页面——简历/公开仓库场景
+  下是一眼可验证的工程素养信号。仓库当前为私有，徽章在转公开后自动渲染。
 - **LLM 调用指标（G10.9 M10）**：Prometheus `/metrics` 新增按 model 分维度的
   `llm_calls_total` / `llm_tokens_total{kind=input|output}` / `llm_call_duration_seconds`
   / `llm_cost_cny_total`——`UsageCollector` 逐 LLM 调用打点（`on_llm_start` 记延迟起点，

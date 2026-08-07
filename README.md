@@ -1,5 +1,7 @@
 # 水利 RAG + Agent
 
+[![CI](https://github.com/wuruiai/ai/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/wuruiai/ai/actions/workflows/ci.yml)
+
 基于 RAG (检索增强生成) 和 Agent 技术的水利行业知识问答系统。
 
 ## 项目特点
