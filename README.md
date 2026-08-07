@@ -192,7 +192,7 @@ water-rag-local/
 ├── scripts/              # 初始化/备份/评测/冒烟脚本
 ├── tests/                # 单元测试（tests/unit）+ 检索评测集（tests/evaluation）
 ├── docs/                 # 文档（架构 / API / 部署 / 开发 / 安全）
-│   └── planning/         # 内部规划文档（优化过程存档，非公开入口）
+│   └── planning/         # 优化过程存档（开发记录）
 └── data/                 # 运行时数据（勿提交 Git）
 ```
 
@@ -203,8 +203,8 @@ water-rag-local/
 - [部署与运维](docs/deployment.md) — Docker / 备份 / 环境变量
 - [开发指南](docs/development.md) — 本地启动、测试、代码规范
 - [安全设计](docs/security.md) — 认证 / 密钥 / 数据隔离
-- [内部规划文档](docs/planning/) — 优化过程分析存档（供参考，非公开入口）
+- [优化过程存档](docs/planning/) — 各阶段优化分析记录
 
 ## 许可证
 
-私有项目，未经授权禁止使用和分发。
+本项目基于 [MIT License](LICENSE) 开源。

@@ -8,6 +8,10 @@
 
 ### Added
 
+- **开源许可证 + 转公开准备（G10.30）**：新增 `LICENSE`（MIT，`Copyright (c) 2026 wuruiai`）；
+  README「许可证」由「私有项目，未经授权禁止使用和分发」改为「基于 MIT License 开源」；
+  README 与 docs/development 中「内部规划文档（非公开入口）」措辞中性化为
+  「优化过程存档（开发记录）」——消除转公开后的矛盾表述。
 - **README CI 状态徽章（G10.29）**：README 标题下新增 GitHub Actions 徽章（`ci.yml` /
   `branch=main`），实时展示主干 CI 绿/红状态，点击直达 Actions 页面——简历/公开仓库场景
   下是一眼可验证的工程素养信号。仓库当前为私有，徽章在转公开后自动渲染。

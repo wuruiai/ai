@@ -72,8 +72,8 @@ water-rag-local/
 ├── scripts/              # 初始化/备份/评测/冒烟脚本
 ├── tests/                # 单元测试（tests/unit）
 ├── docs/                 # 文档
-│   ├── planning/         # 内部规划文档（分析过程存档）
-│   └── *.md              # 公开文档
+│   ├── planning/         # 优化过程存档（开发记录）
+│   └── *.md              # 文档（架构 / API / 部署 / 开发 / 安全）
 └── data/                 # 运行时数据（勿提交 Git）
 ```
 
