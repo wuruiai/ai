@@ -106,6 +106,7 @@ async def retrieve_node(state: KnowledgeQAState) -> dict[str, Any]:
                     "document_id": r.document_id,
                     "score": r.score,
                     "source": r.source,
+                    "page": r.page,  # G10.20：保留页码，随证据透传到 citation
                 }
             )
 
@@ -181,8 +182,13 @@ async def generate_rag_node(state: KnowledgeQAState) -> dict[str, Any]:
     messages = state.get("messages", [])
     evidence = state.get("reranked_evidence", state.get("evidence", []))
 
+    # G10.20 引用同源：citations 与喂给 LLM 的证据切片完全一致（同源同序）。
+    # 此前 chat.py 独立 top-3 检索生成 citations，与 LLM 实际依据的 rerank top-8
+    # 不是同一批 chunk，答案里的 [N] 与引用面板对不上（来源错配/误导）。
+    cited = evidence[:8]
+
     # 构建证据文本
-    evidence_text = "\n\n".join([f"[{i + 1}] {e['content']}" for i, e in enumerate(evidence[:8])])
+    evidence_text = "\n\n".join([f"[{i + 1}] {e['content']}" for i, e in enumerate(cited)])
 
     # 构建提示
     system_prompt = f"""你是水利行业知识问答助手。请基于以下证据回答用户问题。
@@ -207,9 +213,22 @@ async def generate_rag_node(state: KnowledgeQAState) -> dict[str, Any]:
         response = await llm.ainvoke(llm_messages)
         answer = response.content
 
+        # G10.20：citations 即 evidence_text 的第 1..N 条（index 与答案 [N] 一一对应）
+        citations = [
+            {
+                "index": i + 1,
+                "source_id": e.get("chunk_id", ""),
+                "document_id": e.get("document_id", ""),
+                "page": e.get("page"),
+                "content": (e.get("content") or "")[:300],
+            }
+            for i, e in enumerate(cited)
+        ]
+
         return {
             "messages": [AIMessage(content=answer)],
             "answer": answer,
+            "citations": citations,
             "llm_call_count": state.get("llm_call_count", 0) + 1,
             "step_count": state.get("step_count", 0) + 1,
         }

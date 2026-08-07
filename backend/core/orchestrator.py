@@ -62,6 +62,9 @@ class AgentResponse(BaseModel):
     fallback_used: bool = Field(default=False, description="是否触发降级")
     error_msg: str | None = Field(default=None, description="错误信息")
     metadata: dict[str, Any] = Field(default_factory=dict, description="附加元数据")
+    # G10.20 引用同源：由图内生成节点产出（与 LLM 实际依据的证据同源同序），
+    # chat.py 据此推送 citation 事件，不再独立检索 top-3
+    citations: list[dict[str, Any]] = Field(default_factory=list, description="引用列表")
 
 
 class PipelineResult(BaseModel):
@@ -177,6 +180,7 @@ class Orchestrator:
             content=content,
             structured=result_state.get("structured_output"),
             fallback_used=result_state.get("fallback_used", False),
+            citations=result_state.get("citations", []),
         )
 
     async def _run_pipeline(self, request: AgentRequest) -> PipelineResult:

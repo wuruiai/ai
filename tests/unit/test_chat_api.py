@@ -22,20 +22,26 @@ class _FakeOrch:
         for token in list("测试回答内容"):
             for cb in cbs:
                 cb.on_llm_new_token(token)
+        # G10.20：citations 由图内生成节点产出并经 orchestrator 透传（同源证据）
         return AgentResponse(
             success=True,
             agent_type=AgentType.KNOWLEDGE_QA,
-            content="测试回答内容",
+            content="测试回答内容 [1]",
             fallback_used=False,
+            citations=[
+                {
+                    "index": 1,
+                    "source_id": "chunk_a",
+                    "document_id": "doc_a",
+                    "page": 1,
+                    "content": "防洪调度内容",
+                }
+            ],
         )
 
 
 def test_chat_stream_true_streaming(monkeypatch):
-    async def _no_evidence(*a, **k):
-        return []
-
     fake = _FakeOrch()
-    monkeypatch.setattr(chat_api, "hybrid_retrieve", _no_evidence)
     monkeypatch.setattr(chat_api, "get_orchestrator", lambda: fake)
 
     with TestClient(app) as c:
@@ -50,11 +56,15 @@ def test_chat_stream_true_streaming(monkeypatch):
         )
         assert r.status_code == 200
         text = r.text
-        # 完整事件流：start / status / token / done
+        # 完整事件流：start / status / token / citation / citation_verdict / done
         assert "event: start" in text
         assert "event: status" in text
         assert "event: token" in text
         assert "event: done" in text
+        # G10.20：citation 事件来自 orchestrator 返回的同源证据（不再独立 top-3 检索）
+        assert "event: citation" in text
+        assert "chunk_a" in text
+        assert "event: citation_verdict" in text
         # done 带真实 message_id（uuid 形式）
         assert '"message_id"' in text
         # 用户贯穿到 orchestrator
@@ -75,9 +85,6 @@ async def test_sse_disconnect_cancels_orchestrator(monkeypatch):
                 cancelled.set()
                 raise
 
-    async def _no_evidence(*a, **k):
-        return []
-
     async def _no_history(*a, **k):
         return []
 
@@ -85,7 +92,6 @@ async def test_sse_disconnect_cancels_orchestrator(monkeypatch):
         return "mid"
 
     monkeypatch.setattr(chat_api, "_KEEPALIVE_S", 0.2)  # 心跳调短，加速进入 drain 循环
-    monkeypatch.setattr(chat_api, "hybrid_retrieve", _no_evidence)
     monkeypatch.setattr(chat_api, "_load_history", _no_history)
     monkeypatch.setattr(chat_api, "_save_user_message", _no_save)
     monkeypatch.setattr(chat_api, "get_orchestrator", lambda: _BlockingOrch())

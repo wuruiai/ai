@@ -44,7 +44,6 @@ from backend.core.sse import (
 )
 from backend.db.connection import close_db, get_connection
 from backend.rag.citation import citation_checker
-from backend.rag.retriever import retrieve as hybrid_retrieve
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -153,35 +152,6 @@ async def _load_history(thread_id: str, limit: int = 6, user_id: str | None = No
     return msgs
 
 
-async def _fetch_top_evidence(query: str, top_k: int = 3, user_id: str | None = None) -> list[dict]:
-    """用统一混合检索（dense + sparse）拿 top-k 证据，转成 citation 事件结构。
-
-    走统一检索入口 retriever.retrieve()：
-      - 长查询靠 BM25 trigram 命中
-      - 短查询（如"水库"）靠 dense embedding 兜底（trigram 不索引 2 字词）
-    数据隔离：仅检索当前用户拥有的文档。
-    """
-    try:
-        results = await hybrid_retrieve(query, top_k=top_k, user_id=user_id)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("hybrid retrieve failed: %s", e)
-        return []
-    # 批量取文档标题（source_name 更友好）
-    doc_titles = await _fetch_doc_titles([r.document_id for r in results])
-    citations: list[dict] = []
-    for i, r in enumerate(results, start=1):
-        citations.append(
-            {
-                "index": i,
-                "source_id": r.chunk_id,
-                "source_name": doc_titles.get(r.document_id, (r.document_id or "")[:12]),
-                "page": r.page,  # sparse 命中时有页码
-                "content": (r.content or "")[:300],
-            }
-        )
-    return citations
-
-
 async def _fetch_doc_titles(document_ids: list[str]) -> dict[str, str]:
     """批量查 documents 表拿标题（去重后的 id → title）。"""
     unique = list(dict.fromkeys(document_ids))
@@ -236,12 +206,9 @@ async def _chat_stream(query: str, thread_id: str, user: CurrentUser) -> AsyncIt
     # 4. status: retrieving
     yield create_status_event("retrieving").format()
 
-    # 5. 取 top 证据（与 orchestrator 内部检索独立；这里仅用于 citation 事件展示）
-    citations = await _fetch_top_evidence(query, top_k=3, user_id=user.user_id)
-    for c in citations:
-        yield create_citation_event(c).format()
-
-    # 6. status: generating → 调 orchestrator（带多轮记忆历史，不含当前轮）
+    # 5. status: generating → 调 orchestrator（带多轮记忆历史，不含当前轮）。
+    #    citation 事件由 orchestrator 返回后统一推送（G10.20 同源）：引用必须与
+    #    LLM 实际依据的证据一致，而该证据在生成阶段才确定，故不再提前独立检索。
     yield create_status_event("generating").format()
 
     # 真流式：TokenStreamHandler 把 LLM 逐 token 推入队列，下方循环并发 drain；
@@ -313,13 +280,26 @@ async def _chat_stream(query: str, thread_id: str, user: CurrentUser) -> AsyncIt
     # 真流式：token 已在上方循环逐条推送；此处取完整答案用于落库
     answer = response.content or ""
 
-    # G3.2 引用核实：答案生成后对已展示的引用做词汇覆盖校验（防幻觉信号）
-    #   - 落库的 citations 带 verified 标记，历史回放时前端可直接展示
-    #   - 额外推送 citation_verdict 事件，让当前会话的引用面板即时更新
-    citations = citation_checker.verify_citation(answer, citations)
-    yield create_citation_verdict_event(
-        [{"index": c["index"], "verified": c["verified"]} for c in citations]
-    ).format()
+    # G10.20 引用同源：citations 来自图内生成节点的 evidence[:8]（LLM 实际依据，
+    # 与答案里的 [N] 一一对应），这里只补文档标题并推送，不再独立 top-3 检索。
+    citations = response.citations or []
+    if citations:
+        doc_titles = await _fetch_doc_titles([c.get("document_id", "") for c in citations])
+        for c in citations:
+            c["source_name"] = doc_titles.get(
+                c.get("document_id", ""), (c.get("source_id") or "")[:12]
+            )
+            c["content"] = (c.get("content") or "")[:300]
+        for c in citations:
+            yield create_citation_event(c).format()
+
+        # G3.2 引用核实：答案生成后对已展示的引用做词汇覆盖校验（防幻觉信号）
+        #   - 落库的 citations 带 verified 标记，历史回放时前端可直接展示
+        #   - 额外推送 citation_verdict 事件，让当前会话的引用面板即时更新
+        citations = citation_checker.verify_citation(answer, citations)
+        yield create_citation_verdict_event(
+            [{"index": c["index"], "verified": c["verified"]} for c in citations]
+        ).format()
 
     # 6.5 高风险提示：问题涉及防汛调度/工程安全/法规合规时附人工复核提醒
     if is_high_risk(query):

@@ -23,6 +23,12 @@
 
 ### Fixed
 
+- **检索：citation 与生成证据同源对齐（G10.20）**：`/chat/stream` 的引用事件此前由
+  chat.py 对 query 做**独立** top-3 检索生成，与 LLM 实际依据的证据（图内 rerank 后 top-8）
+  不是同一批 chunk——答案里的 `[N]` 与引用面板对不上（来源错配/误导，且多一次检索调用）。
+  现 citations 改由图内 `generate_rag_node` 与 `evidence_text` 同步产出（同一证据切片、
+  同序、index 与 `[N]` 一一对应），orchestrator 经 `AgentResponse.citations` 透传，chat.py
+  仅补文档标题后推送。5 个回归测试。
 - **摄取：TXT/MD 解析移出事件循环 + Chroma 幂等/回滚（G10.19）**：① `.txt`/`.md` 解析此前在
   worker 协程里直接 `file.read_text()` 整读大文件——阻塞事件循环，PDF/DOCX 已走线程池唯独
   这两个分支漏掉；现收敛到 `parser.parse_txt/parse_md`（同样 `run_in_executor`）。② Chroma
