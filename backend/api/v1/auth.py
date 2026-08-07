@@ -28,7 +28,7 @@ from backend.config import settings
 from backend.core.audit import write_audit
 from backend.core.backends import get_rate_limit_backend
 from backend.core.logger import get_logger
-from backend.core.security import validate_origin
+from backend.core.security import resolve_client_ip, validate_origin
 from backend.db.connection import close_db, get_connection
 
 logger = get_logger(__name__)
@@ -298,17 +298,13 @@ def _user_public(user_id: str, username: str, role: str, display_name: str) -> d
 
 
 def _client_ip(request: Request) -> str | None:
-    """客户端 IP：优先取 `X-Forwarded-For` 最左侧（反代 nginx 追加时最左侧是真实客户端），
-    回退 `request.client.host`（直连场景）。登录/注册限流与审计都按此 IP 维度计数——
-    若不解析反代头，反代后所有请求的 IP 都是 nginx 的，IP 维度限流形同虚设。
+    """客户端 IP（G10.17）：仅信任来自可信代理的 XFF，见 security.resolve_client_ip。
+
+    登录/注册限流与审计都按此 IP 维度计数。注意：直连场景下 XFF 不可信（可伪造），
+    一律取直连地址；只有反代 peer 在 TRUSTED_PROXIES 内时才采信 XFF 最左侧。
     """
     try:
-        xff = request.headers.get("x-forwarded-for")
-        if xff:
-            first = xff.split(",")[0].strip()
-            if first:
-                return first
-        return request.client.host if request.client else None
+        return resolve_client_ip(request) or None
     except Exception:  # noqa: BLE001
         return None
 

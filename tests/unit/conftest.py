@@ -26,6 +26,9 @@ os.environ.setdefault("LOG_PATH", os.path.join(_TMP, "logs"))
 # 假 key：单测不调云端；仅用于绕过“空 key”相关分支
 os.environ.setdefault("DASHSCOPE_API_KEY", "unit-test-fake-key")
 os.environ.setdefault("DAILY_CALL_LIMIT", "1000")
+# TestClient 直连 peer 是 "testclient"：把它列为可信代理，测试里用 X-Forwarded-For
+# 模拟来源 IP 的用例（注册限流/锁号作用域）仍按原语义工作；未配置信任时 XFF 一律忽略（G10.17）
+os.environ.setdefault("TRUSTED_PROXIES", "testclient")
 
 
 @pytest.fixture(autouse=True)

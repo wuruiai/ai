@@ -23,6 +23,7 @@ from backend.api.router import api_router
 from backend.config import settings
 from backend.core.logger import get_logger, set_request_id, setup_logging, unify_uvicorn_logging
 from backend.core.metrics import instrument_request
+from backend.core.security import resolve_client_ip
 from backend.db.connection import close_db, get_connection
 from backend.db.migrations import migrate
 from backend.tasks.queue import recover_stale_tasks, worker_loop
@@ -118,14 +119,11 @@ app.add_middleware(
 
 
 def _client_ip(request: Request) -> str:
-    """真实客户端 IP：优先 X-Forwarded-For 最左侧（反代后首个跳），回退直连地址。
+    """真实客户端 IP（G10.17）：仅信任来自可信代理的 XFF，见 security.resolve_client_ip。
 
     与 auth 限流/审计的 IP 解析保持一致（M6），保证 access 日志里记录的是用户 IP。
     """
-    xff = request.headers.get("X-Forwarded-For")
-    if xff:
-        return xff.split(",")[0].strip()
-    return request.client.host if request.client else ""
+    return resolve_client_ip(request)
 
 
 @app.middleware("http")

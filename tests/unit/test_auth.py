@@ -305,12 +305,16 @@ def test_admin_bootstrap_username_explicit(monkeypatch):
         assert r.json()["user"]["role"] == "admin"
 
 
-def test_client_ip_prefers_x_forwarded_for():
-    """G10.5 M6：反代场景下客户端 IP 取 X-Forwarded-For 最左侧（真实客户端），
-    而非 nginx 地址；直连（无该头）回退 request.client.host。"""
+def test_client_ip_prefers_x_forwarded_for(monkeypatch):
+    """G10.5 M6 + G10.17：仅当直连 peer 是可信代理时才采信 X-Forwarded-For。
+
+    可信反代场景取 XFF 最左侧（真实客户端）；直连（无该头）回退 socket 地址；
+    peer 不在 TRUSTED_PROXIES 内时伪造的 XFF 一律忽略（防 IP 旋转绕过限流）。
+    """
     from starlette.requests import Request
 
     from backend.api.v1 import auth as auth_api
+    from backend.config import settings
 
     def _make(xff: str | None) -> Request:
         headers = []
@@ -330,8 +334,14 @@ def test_client_ip_prefers_x_forwarded_for():
         }
         return Request(scope)
 
+    # 直连 peer 192.168.1.99 是可信代理 → 采信 XFF 最左侧（真实客户端）
+    monkeypatch.setattr(settings, "TRUSTED_PROXIES", "192.168.1.99")
     assert auth_api._client_ip(_make("203.0.113.50")) == "203.0.113.50"
     # 多级反代：取最左侧（真实客户端），右侧为各级代理
     assert auth_api._client_ip(_make("203.0.113.50, 10.0.0.2, 10.0.0.1")) == "203.0.113.50"
     # 直连（无反代头）→ 回退 socket 地址
     assert auth_api._client_ip(_make(None)) == "192.168.1.99"
+
+    # G10.17：peer 不在可信列表 → 伪造的 XFF 被忽略，回退直连地址
+    monkeypatch.setattr(settings, "TRUSTED_PROXIES", "")
+    assert auth_api._client_ip(_make("6.6.6.6")) == "192.168.1.99"

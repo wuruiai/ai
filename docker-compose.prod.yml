@@ -35,6 +35,9 @@ services:
       - FRONTEND_ORIGIN=http://localhost,http://127.0.0.1
       - REDIS_URL=${REDIS_URL:-}
       - BACKUP_ENABLED=true
+      # 反代信任（G10.17）：nginx 容器在 docker 网桥（172.16/12 段）内，配置后 access 日志/
+      # 登录限流才能解析到真实客户端 IP；留空则一律取直连地址（nginx 地址），更安全但不区分用户 IP。
+      - TRUSTED_PROXIES=${TRUSTED_PROXIES:-172.16.0.0/12}
     volumes:
       - water_data:/app/data
     healthcheck:

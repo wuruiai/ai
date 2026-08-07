@@ -83,6 +83,12 @@
 
 ### Security
 
+- **X-Forwarded-For 仅对可信代理采信（G10.17）**：登录/注册限流、审计与 access 日志的
+  客户端 IP 解析不再无条件信任 `X-Forwarded-For` 最左侧——攻击者可伪造该头逐条旋转
+  "来源 IP"，逐请求规避 IP 维度限流（也让 G10.13 的锁号作用域形同虚设）。新增
+  `TRUSTED_PROXIES` 配置（精确 IP 或 CIDR）：仅当直连 peer 落在可信列表内（反代 nginx
+  场景）才采信 XFF，否则一律取直连地址；main.py 与 auth.py 统一收敛到
+  `security.resolve_client_ip`。10 个回归测试。
 - **辅助 LLM 不再泄漏中间产物到 SSE 流（G10.14）**：`chat/stream` 注入的
   `[TokenStreamHandler, UsageCollector]` 回调链此前被分类器 / HyDE / 多查询改写等
   辅助 LLM 全量透传——分类器 JSON（`{"type": ...}`）等中间产物逐 token 推入 SSE

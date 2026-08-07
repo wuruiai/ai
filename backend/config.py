@@ -82,6 +82,12 @@ class Settings(BaseSettings):
                     origins.add(o)
         return origins
 
+    # 反代信任（G10.17）：仅当直连 peer 在此列表内时才采信 X-Forwarded-For。
+    # 逗号分隔的 IP 或 CIDR（如 "172.16.0.0/12" 覆盖 docker 网桥，nginx 容器 IP 往往落内网段）。
+    # 留空 = 不信任任何代理——客户端 IP 一律取直连地址，杜绝伪造 XFF 旋转"来源 IP"绕过
+    # 登录/注册限流（也让审计 IP 失真）。生产部署在 nginx 反代后需配置本项才能拿到真实客户端 IP。
+    TRUSTED_PROXIES: str = ""
+
     # DashScope 云服务
     DASHSCOPE_API_KEY: str = ""
     # 兼容 OpenAI 协议端点（LLM / Embedding 统一走这里；G7.2 收口避免硬编码）
