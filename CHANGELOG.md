@@ -23,6 +23,11 @@
 
 ### Fixed
 
+- **GitHub Actions 依赖 Node 20 弃用警告（G10.27）**：CI 各 job 的 action 升级到 Node 24
+  运行时版本（`actions/checkout@v5`、`actions/setup-python@v6`、`actions/setup-node@v5`、
+  `docker/setup-buildx-action@v4`、`docker/login-action@v4`、`docker/build-push-action@v7`），
+  消除 runner 强制降级到 Node 24 的 deprecation 注解。升级前逐一核对各 major 的 breaking
+  changes（v5/v6/v7 均仅迁移运行时，无输入破坏；build-push v7 仅移除未使用的 deprecated env）。
 - **GitHub Actions 工作流解析失败（G10.26）**：首次推送 `main` 后 CI 整条 run 0 秒失败、
   无日志——两处 `if:` 表达式非法使用 `secrets` context（step 级与 job 级 `if` 均不允许，
   可用 context 仅 `env/github/inputs/needs/vars/...`），GitHub 解析期直接判工作流无效。
