@@ -53,7 +53,8 @@ class SQLitePool:
             asyncio.Queue(maxsize=size) if size > 1 else None
         )
         # 记录池创建过的全部连接，供 close() 在应用关闭时兜底清理，
-        # 避免 aiosqlite 后台线程（非 daemon）拖住解释器不退出
+        # 避免 aiosqlite 后台线程（非 daemon）拖住解释器不退出；
+        # 仅在连接仍存活时保留——关闭即从 _all 摘除（见 _connect/release）
         self._all: set[aiosqlite.Connection] = set()
 
     async def _connect(self) -> aiosqlite.Connection:
@@ -61,9 +62,17 @@ class SQLitePool:
         # aiosqlite.connect 会抛 "unable to open database file"。
         Path(self._path).parent.mkdir(parents=True, exist_ok=True)
         db = await aiosqlite.connect(self._path)
-        for stmt in _PRAGMAS:
-            await db.execute(stmt)
+        # G10.24：先登记再执行 PRAGMA——任一 PRAGMA 失败时连接已在 _all 中，
+        # 能在 except 里关闭并摘除；此前先跑 PRAGMA 后登记，失败路径既不进 _all
+        # 也不关闭，直接泄漏一个 aiosqlite 后台线程。
         self._all.add(db)
+        try:
+            for stmt in _PRAGMAS:
+                await db.execute(stmt)
+        except Exception:
+            await db.close()
+            self._all.discard(db)
+            raise
         return db
 
     async def close(self) -> None:
@@ -96,6 +105,8 @@ class SQLitePool:
         """归还连接（池化开启时）；否则直接关闭。"""
         if self._size <= 1 or self._idle is None:
             await db.close()
+            # G10.24：已关闭连接从 _all 摘除，避免集合只增不减
+            self._all.discard(db)
             return
         # 清掉可能遗留的未提交事务，避免脏状态污染下次复用；
         # 回滚失败说明连接已坏，直接丢弃
@@ -103,11 +114,13 @@ class SQLitePool:
             await db.rollback()
         except Exception:  # noqa: BLE001 -- 连接损坏，丢弃
             await db.close()
+            self._all.discard(db)
             return
         try:
             self._idle.put_nowait(db)
         except asyncio.QueueFull:
             await db.close()
+            self._all.discard(db)
 
 
 # 模块级单例（路径/大小来自 settings；测试中 DB_POOL_SIZE=0 → 不池化）
@@ -127,3 +140,14 @@ async def close_db(db: aiosqlite.Connection | None) -> None:
         await _db_pool.release(db)
     except Exception:  # noqa: BLE001, S110 -- 已关闭或异常时不抛出（容错归还）
         pass
+
+
+async def close_pool() -> None:
+    """关闭模块级连接池持有的全部连接（一次性脚本/测试退出前调用）。
+
+    `get_connection` 池化（DB_POOL_SIZE>1）时，`close_db` 只是把连接归还空闲队列，
+    aiosqlite 后台线程（非 daemon）仍存活，会拖住解释器不退出——`backend/main.py`
+    在 lifespan 关闭时调用 `_db_pool.close()` 兜底，一次性脚本（init_db / backup /
+    seed_demo …）需在收尾显式调用本函数。幂等：无存活连接时静默。
+    """
+    await _db_pool.close()

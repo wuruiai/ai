@@ -20,7 +20,7 @@ from pathlib import Path
 # 脚本独立运行：未 pip install 时把项目根加入 sys.path，保证 backend 包可直接导入
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from backend.db.connection import get_connection
+from backend.db.connection import close_db, close_pool, get_connection
 from backend.db.migrations import SCHEMA_VERSION, downgrade, get_schema_version
 
 
@@ -34,7 +34,9 @@ async def _run(to_version: int) -> None:
         await downgrade(db, to_version)
         print(f"Downgraded v{current} -> v{to_version}.")
     finally:
-        await db.close()
+        # G10.24：统一走 close_db 归还连接 + 关闭连接池（同 init_db.py）
+        await close_db(db)
+        await close_pool()
 
 
 def main() -> None:

@@ -22,30 +22,6 @@ from backend.core.backends import (
 # ---------------------------------------------------------------------------
 
 
-class _FakePipe:
-    def __init__(self, r: "_FakeRedis") -> None:
-        self._r = r
-        self._ops: list[tuple] = []
-
-    def zremrangebyscore(self, key, min_, max_):
-        self._ops.append(("zrem", key, min_, max_))
-        return self
-
-    def zcard(self, key):
-        self._ops.append(("zcard", key))
-        return self
-
-    def execute(self) -> list:
-        out = []
-        for op in self._ops:
-            if op[0] == "zrem":
-                out.append(self._r.zremrangebyscore(op[1], op[2], op[3]))
-            elif op[0] == "zcard":
-                out.append(self._r.zcard(op[1]))
-        self._ops.clear()
-        return out
-
-
 class _FakeRedis:
     """最小可用的 Redis 假实现，够测限流/预算逻辑。"""
 
@@ -53,9 +29,16 @@ class _FakeRedis:
         self._zsets: dict[str, dict] = {}
         self._str: dict[str, str] = {}
 
-    # --- pipeline ---
-    def pipeline(self, transaction=True):
-        return _FakePipe(self)
+    # --- eval（复刻 _REDIS_ALLOW_LUA：清过期→计数→条件写入，单次原子） ---
+    # args = [key, min_ms, limit, score, member, window_s]
+    def eval(self, script, numkeys, *args):
+        key, min_ms, limit = args[0], int(args[1]), int(args[2])
+        self.zremrangebyscore(key, 0, min_ms)
+        if self.zcard(key) >= limit:
+            return 0
+        self.zadd(key, {args[4]: int(args[3])})
+        self.expire(key, int(args[5]))
+        return 1
 
     # --- zset ---
     def zadd(self, key, mapping):
@@ -141,6 +124,28 @@ def test_redis_rate_limit_sliding_window(monkeypatch):
     # 窗口滑动 60s+：旧记录过期，恢复放行
     clock["t"] += 61
     assert rl.allow("u1")
+
+
+def test_redis_rate_limit_single_atomic_eval_roundtrip(monkeypatch):
+    """G10.24：allow 通过单次原子 eval 完成，不再"pipeline 计数 + 客户端另发 zadd"两步走。
+
+    两次请求间没有任何客户端往返窗口，多 worker 并发突发时在 Redis 侧原子串行，
+    不会双双读到 count=limit-1 而突破上限。
+    """
+    fake = _FakeRedis()
+    calls = {"n": 0}
+    real_eval = fake.eval
+
+    def _counting_eval(script, numkeys, *args):
+        calls["n"] += 1
+        return real_eval(script, numkeys, *args)
+
+    fake.eval = _counting_eval
+    rl = RedisRateLimitBackend(limit=3, window_s=60, client=fake)
+    for _ in range(3):
+        assert rl.allow("u1") is True
+    assert rl.allow("u1") is False
+    assert calls["n"] == 4  # 每次 allow 恰好一次 eval，无额外 pipeline/zadd 往返
 
 
 # ---------------------------------------------------------------------------

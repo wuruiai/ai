@@ -69,12 +69,30 @@ class InMemoryRateLimitBackend:
 # 限流：Redis 实现（滑动窗口，sorted set）
 # ---------------------------------------------------------------------------
 
+# G10.24：限流判定整体在服务端原子执行（清过期→计数→达标判断→条件写入）。
+# 此前实现是 pipeline 计完数后客户端再另发一条 zadd——check-then-act 窗口下
+# 多 worker 并发突发可能双双读到 count=limit-1 都放行，突破限流上限。
+# ARGV：1=min_ms  2=limit  3=新 score（当前 ms）  4=唯一 member  5=window_s
+_REDIS_ALLOW_LUA = """
+local min_ms = tonumber(ARGV[1])
+redis.call('zremrangebyscore', KEYS[1], 0, min_ms)
+local count = redis.call('zcard', KEYS[1])
+if count >= tonumber(ARGV[2]) then
+    return 0
+end
+redis.call('zadd', KEYS[1], ARGV[3], ARGV[4])
+redis.call('expire', KEYS[1], ARGV[5])
+return 1
+"""
+
 
 class RedisRateLimitBackend:
     """Redis 滑动窗口限流。
 
     key = `rl:{key}`，sorted set 存窗口内时间戳；每次 allow 清理过期后计数。
     与 InMemory 语义一致：窗口内允许 limit 次，第 limit+1 次拒绝。
+    allow 用 Lua 在服务端原子完成"清过期→计数→写入"，多 worker 并发下
+    也不突破 limit（G10.24）。
     """
 
     def __init__(self, limit: int, window_s: int, client: object | None = None) -> None:
@@ -86,16 +104,19 @@ class RedisRateLimitBackend:
         rkey = f"rl:{key}"
         now_ms = int(time.time() * 1000)
         min_ms = now_ms - self.window_s * 1000
-        pipe = self._redis.pipeline(transaction=True)
-        pipe.zremrangebyscore(rkey, 0, min_ms)
-        pipe.zcard(rkey)
-        count = pipe.execute()[1]
-        if count >= self.limit:
-            return False
-        # member 用唯一值、score 用时间戳：同一毫秒内的多次请求不会合并成一条
-        self._redis.zadd(rkey, {str(uuid.uuid4()): now_ms})
-        self._redis.expire(rkey, self.window_s)
-        return True
+        # 单次 eval 原子完成判定；member 用唯一值、score 用时间戳，
+        # 同一毫秒内的多次请求不会合并成一条
+        ok = self._redis.eval(
+            _REDIS_ALLOW_LUA,
+            1,
+            rkey,
+            min_ms,
+            self.limit,
+            now_ms,
+            str(uuid.uuid4()),
+            self.window_s,
+        )
+        return bool(ok)
 
 
 # ---------------------------------------------------------------------------

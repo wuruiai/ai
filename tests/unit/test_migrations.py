@@ -1,5 +1,7 @@
 """迁移测试：幂等性 + v2 结构 + migration_log 审计 + 降级。"""
 
+import asyncio
+
 import aiosqlite
 
 from backend.db.migrations import (
@@ -170,3 +172,83 @@ async def test_downgrade_too_high_is_noop(tmp_path):
         assert "llm_usage" in await _tables(db)
     finally:
         await db.close()
+
+
+# ---------------------------------------------------------------------------
+# G10.24：并发实例启动时 migrate 必须串行化
+# ---------------------------------------------------------------------------
+
+
+class _PauseResult:
+    """复刻 aiosqlite `execute` 的双协议（awaitable + async ctx mgr）。
+
+    首个连接读 schema 版本时让出 50ms——修复代码里版本读在 BEGIN IMMEDIATE
+    写锁内，让出期间第二个并发 migrate 的 BEGIN IMMEDIATE 在 SQLite 层排队；
+    未修复代码里版本读在事务外，两个 migrate 都能读到旧版本、双双执行非幂等
+    ALTER，产生确定性分歧。"""
+
+    def __init__(self, inner, sql, args, kwargs, pause):
+        self._inner = inner
+        self._sql = sql
+        self._args = args
+        self._kwargs = kwargs
+        self._pause = pause
+        self._ctx = None
+
+    async def _start(self):
+        self._ctx = self._inner.execute(self._sql, *self._args, **self._kwargs)
+        cur = await self._ctx.__aenter__()
+        if self._pause and "SELECT version FROM schema_version" in self._sql:
+            await asyncio.sleep(0.05)
+        return cur
+
+    def __await__(self):
+        return self._start().__await__()
+
+    async def __aenter__(self):
+        return await self._start()
+
+    async def __aexit__(self, *exc):
+        if self._ctx is not None:
+            return await self._ctx.__aexit__(*exc)
+        return False
+
+
+class _ConnProxy:
+    def __init__(self, inner, pause):
+        self._inner = inner
+        self._pause = pause
+
+    def execute(self, sql, *args, **kwargs):
+        return _PauseResult(self._inner, sql, args, kwargs, self._pause)
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+async def test_concurrent_migrate_is_serialized(tmp_path):
+    """G10.24：两个并发 migrate 启动时串行化——后到者等首个提交后读到新版本
+    空操作，绝不重复执行非幂等 ALTER TABLE ADD COLUMN。
+
+    未修复时版本检查在事务外：两个 migrate 都读到 v0 并同时执行 _migrate_v2 的
+    `ALTER TABLE users ADD COLUMN role`，先到者提交后后到者在该列上报
+    duplicate column。修复后 BEGIN IMMEDIATE 把首个的整个迁移（含版本读）锁进
+    写锁，第二个阻塞至提交后才读版本 → 直接空操作。
+    """
+    db_a = await aiosqlite.connect(str(tmp_path / "m.db"))
+    db_b = await aiosqlite.connect(str(tmp_path / "m.db"))
+    try:
+        results = await asyncio.gather(
+            migrate(_ConnProxy(db_a, pause=True)),
+            migrate(_ConnProxy(db_b, pause=False)),
+        )
+        # 两个实例都正常返回（无 duplicate column / database is locked）
+        assert results == [None, None]
+        assert await get_schema_version(db_a) == SCHEMA_VERSION
+        # migration_log 只写一轮，未被并发重复
+        async with db_a.execute("SELECT COUNT(*) FROM migration_log") as cur:
+            (n,) = await cur.fetchone()
+        assert n == SCHEMA_VERSION
+    finally:
+        await db_a.close()
+        await db_b.close()

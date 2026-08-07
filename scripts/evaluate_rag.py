@@ -27,7 +27,7 @@ ROOT = Path(__file__).parent.parent
 # 脚本独立运行：未 pip install 时把项目根加入 sys.path，保证 backend 包可直接导入
 sys.path.insert(0, str(ROOT))
 
-from backend.db.connection import close_db, get_connection  # noqa: E402
+from backend.db.connection import close_db, close_pool, get_connection  # noqa: E402
 from backend.rag.retriever import retrieve  # noqa: E402
 
 DEFAULT_EVAL_SET = ROOT / "tests" / "evaluation" / "eval_set.jsonl"
@@ -104,6 +104,8 @@ async def run_eval(items: list[dict], k_values: list[int], user_id: str | None) 
         return rows
     finally:
         await close_db(db)
+        # G10.24：一次性脚本收尾关闭连接池，避免 aiosqlite 后台线程拖住解释器
+        await close_pool()
 
 
 def render_report(rows: list[dict], k_values: list[int], user_id: str | None) -> str:

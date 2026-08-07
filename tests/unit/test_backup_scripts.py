@@ -50,3 +50,30 @@ def test_validate_backup_ok(tmp_path, monkeypatch):
 
 def test_validate_backup_missing_db(tmp_path):
     assert any("water.db" in p for p in backup_data.validate_backup(tmp_path))
+
+
+def test_backup_db_produces_consistent_wal_snapshot(tmp_path):
+    """G10.24：在线备份 API 对活动中的 WAL 库产出可直接打开、含已提交数据的一致性快照。
+
+    源连接保持打开：已提交数据未必 checkpoint 回主库（可能仍在 -wal），裸拷贝
+    db+-wal+-shm 三件套在此瞬间无法保证快照一致——回归点。
+    """
+    src = tmp_path / "live.db"
+    conn = sqlite3.connect(src)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)")
+    conn.execute("INSERT INTO t (name) VALUES ('水利-在WAL')")
+    conn.commit()
+    try:
+        dst = tmp_path / "snap.db"
+        backup_data._backup_db(src, dst)
+
+        # 快照是可直接独立打开的单文件库：完整性 + 数据都在
+        check = sqlite3.connect(f"file:{dst}?mode=ro", uri=True)
+        try:
+            assert check.execute("PRAGMA integrity_check").fetchall() == [("ok",)]
+            assert check.execute("SELECT name FROM t").fetchall() == [("水利-在WAL",)]
+        finally:
+            check.close()
+    finally:
+        conn.close()

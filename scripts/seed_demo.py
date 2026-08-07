@@ -28,7 +28,7 @@ DEMO_TEXT = """水利工程是用于控制和调配自然界的地表水和地�
 
 async def seed() -> int:
     from backend.config import settings
-    from backend.db.connection import close_db, get_connection
+    from backend.db.connection import close_db, close_pool, get_connection
     from backend.tasks.ingestion_worker import IngestionStatus, ingest_document
 
     source_dir = Path(settings.SOURCE_PATH)
@@ -64,6 +64,8 @@ async def seed() -> int:
         await close_db(db)
 
     status = await ingest_document(file_path, document_id)
+    # G10.24：摄取完成后关闭连接池，避免 aiosqlite 后台线程拖住解释器不退出
+    await close_pool()
     print(f"Demo document: {file_path.name} (document_id={document_id[:16]}...)")
     print(f"  insert={'new' if inserted else 'existing, re-seeded'}  status={status.value}")
     if status != IngestionStatus.READY:

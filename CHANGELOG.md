@@ -23,6 +23,23 @@
 
 ### Fixed
 
+- **数据层：连接池 _all 关闭 + scripts 关连接 + 备份/Redis/迁移原子化（G10.24）**：
+  ① 连接池 `_all` 台账只跟踪存活连接——`release` 关闭连接即从 `_all` 摘除（此前
+  只增不减，反复 acquire/release 后集合无限增长、`close()` 逐一重关死连接）；建连
+  PRAGMA 失败时先登记再执行，失败则关闭并摘除（此前连接既不进 `_all` 也不关闭，
+  直接泄漏一个 aiosqlite 后台线程）。② scripts 统一走 `close_db` 归还连接——
+  `init_db`/`downgrade_db` 此前裸 `db.close()` 绕过池的台账；新增公开 `close_pool()`
+  供一次性脚本收尾关闭整个池（`main.py` lifespan 已有此兜底，脚本缺）：池化下
+  `close_db` 只把连接归还空闲队列、非 daemon 后台线程仍存活会拖住解释器不退出，
+  init/downgrade/seed_demo/rebuild_index/evaluate_rag 五个脚本统一补上。③ 备份
+  `backup_data.py` 从裸拷贝 db+-wal+-shm 三件套（拷贝瞬间状态各不相同、快照可能
+  不一致）改为 SQLite 在线备份 API（`Connection.backup()`）——页级一致、把 WAL 中
+  已提交数据一并落进单文件，备份产物可直接独立打开。④ Redis 限流 `allow` 从
+  "pipeline 计数 + 客户端另发 zadd"两步走（check-then-act 窗口下并发突发可双双读到
+  count=limit-1 都放行）改为单次 Lua `eval` 在服务端原子完成"清过期→计数→条件写入"。
+  ⑤ `migrate()`/`downgrade()` 版本检查此前在事务外——两个实例同时启动都读到旧版本、
+  同时执行非幂等 `ALTER TABLE ADD COLUMN`（后到者报 duplicate column），现 `BEGIN
+  IMMEDIATE` 先取写锁再读版本，整体串行化。7 个回归测试。
 - **认证：admin bootstrap 原子化（G10.23）**：`register` 判定"首个注册者成为 admin"是
   check-then-act——两个并发注册可同时读到 `admin_count=0`，双双以 admin 身份插入
   （首个 admin 席位被"先到先得"抢占，开放注册下等于先注册先夺权）。现包一层

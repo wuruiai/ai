@@ -31,7 +31,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from backend.config import settings
-from backend.db.connection import close_db, get_connection
+from backend.db.connection import close_db, close_pool, get_connection
 
 
 async def _load_all_chunks() -> list[dict]:
@@ -57,6 +57,8 @@ async def _load_all_chunks() -> list[dict]:
         ]
     finally:
         await close_db(db)
+        # G10.24：一次性脚本收尾关闭连接池，避免 aiosqlite 后台线程拖住解释器
+        await close_pool()
 
 
 async def rebuild(chunk_size: int = 128) -> int:

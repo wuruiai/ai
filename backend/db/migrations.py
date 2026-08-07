@@ -67,21 +67,25 @@ async def migrate(db: aiosqlite.Connection) -> None:
     单事务；任一语句失败整体回滚（SQLite 默认每条语句独立事务，
     我们用 explicit BEGIN/COMMIT 包住）。
     """
-    current = await get_schema_version(db)
-
-    if current > SCHEMA_VERSION:
-        raise RuntimeError(
-            f"database schema v{current} is newer than supported v{SCHEMA_VERSION}; "
-            f"refusing to start to avoid data corruption. "
-            f"Please upgrade the application or restore a v{SCHEMA_VERSION} backup."
-        )
-
-    if current == SCHEMA_VERSION:
-        logger.info("no migration needed.")
-        return
-
-    await db.execute("BEGIN")
+    # G10.24：BEGIN IMMEDIATE 先取写锁再读版本，串行化并发实例启动时的迁移。
+    # 此前版本检查在事务外：两个实例同时启动都读到旧版本、同时执行非幂等的
+    # ALTER TABLE ADD COLUMN（_migrate_v2/_v3），后到者报 duplicate column。
+    await db.execute("BEGIN IMMEDIATE")
     try:
+        current = await get_schema_version(db)
+
+        if current > SCHEMA_VERSION:
+            raise RuntimeError(
+                f"database schema v{current} is newer than supported v{SCHEMA_VERSION}; "
+                f"refusing to start to avoid data corruption. "
+                f"Please upgrade the application or restore a v{SCHEMA_VERSION} backup."
+            )
+
+        if current == SCHEMA_VERSION:
+            await db.commit()  # 空操作也要提交，结束 BEGIN IMMEDIATE 拿到的写锁
+            logger.info("no migration needed.")
+            return
+
         # 框架表（schema_version + migration_log）先建，后续迁移依赖它
         await _ensure_framework_tables(db)
 
@@ -132,15 +136,17 @@ async def downgrade(db: aiosqlite.Connection, to_version: int) -> None:
     - 逐步执行 _downgrade_vN，删除高于目标版本的迁移
     - 与 migrate() 同事务：任一步失败整体回滚
     """
-    current = await get_schema_version(db)
-    if to_version >= current:
-        logger.info("nothing to downgrade (current=%d, to=%d)", current, to_version)
-        return
-    if to_version < 0:
-        raise ValueError("to_version must be >= 0")
-
-    await db.execute("BEGIN")
+    # G10.24：与 migrate() 一致，先取写锁再读版本，避免与并发升级/另一进程降级交错
+    await db.execute("BEGIN IMMEDIATE")
     try:
+        current = await get_schema_version(db)
+        if to_version >= current:
+            await db.commit()  # 空操作也要提交，结束写锁
+            logger.info("nothing to downgrade (current=%d, to=%d)", current, to_version)
+            return
+        if to_version < 0:
+            raise ValueError("to_version must be >= 0")
+
         await _ensure_framework_tables(db)
         for v in range(current, to_version, -1):
             await _apply_downgrade(db, v)

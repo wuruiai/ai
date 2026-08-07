@@ -1,6 +1,9 @@
 """SQLite 连接池测试（G4.2）：复用 / 归还 / 事务清理 / 上限 / 关闭。"""
 
+import sqlite3
 from pathlib import Path
+
+import pytest
 
 from backend.db.connection import SQLitePool, close_db, get_connection
 
@@ -97,3 +100,64 @@ async def test_close_drains_idle_connections(tmp_path: Path):
     c1 = await pool.acquire()
     await pool.release(c1)  # 进入空闲队列
     await pool.close()  # 不应挂起、不应抛异常
+
+
+async def test_release_discards_closed_connection_from_all(tmp_path: Path):
+    """G10.24：连接被 release 关闭后应从 _all 摘除，避免集合只增不减。
+
+    非池化（size<=1）路径 release 即关闭连接，此前从不 discard —— 反复
+    acquire/release 后 _all 无限增长，close() 要逐一（重）关闭已死连接。
+    """
+
+    async def run(pool):
+        for _ in range(3):
+            db = await pool.acquire()
+            assert len(pool._all) == 1
+            await pool.release(db)
+            assert len(pool._all) == 0  # 已关闭，不再被池跟踪
+
+    await _with_pool(1, tmp_path / "pool.db", run)
+
+
+async def test_release_keeps_live_connection_in_all(tmp_path: Path):
+    """G10.24：池化路径归还到空闲队列的连接仍存活，应保留在 _all（供 close 兜底）。"""
+    pool = SQLitePool(size=2, path=str(tmp_path / "pool2.db"))
+    a = await pool.acquire()
+    await pool.release(a)
+    assert len(pool._all) == 1
+    await pool.close()
+    assert len(pool._all) == 0
+
+
+async def test_connect_pragma_failure_does_not_leak(tmp_path: Path, monkeypatch):
+    """G10.24：建连 PRAGMA 失败时连接被关闭并从 _all 摘除，不泄漏后台线程。
+
+    注：`PRAGMA bogus_option = 1` 在 Python sqlite3 里静默 no-op 不抛错，
+    故用一条必然失败的语句 `NOT VALID SQL` 触发建连清理路径——与真实场景
+    （WAL/外键 PRAGMA 在只读目录等环境下失败）走同一段 except。
+    """
+    import backend.db.connection as conn_mod
+
+    monkeypatch.setattr(conn_mod, "_PRAGMAS", ["NOT VALID SQL"])
+    pool = SQLitePool(size=0, path=str(tmp_path / "pool.db"))
+    with pytest.raises(sqlite3.OperationalError):
+        await pool.acquire()
+    assert len(pool._all) == 0  # 失败连接已关闭并摘除
+    await pool.close()
+
+
+async def test_close_pool_releases_module_pool(tmp_path: Path, monkeypatch):
+    """G10.24：close_pool 关闭模块级池全部连接——一次性脚本退出前防解释器挂起。
+
+    池化下 close_db 只是归还空闲队列（连接仍存活、线程仍在），脚本退出前必须
+    显式关闭整个池（同 main.py lifespan 的 _db_pool.close()）。
+    """
+    import backend.db.connection as conn_mod
+
+    pool = SQLitePool(size=2, path=str(tmp_path / "pool.db"))
+    monkeypatch.setattr(conn_mod, "_db_pool", pool)
+    db = await conn_mod.get_connection()
+    await conn_mod.close_db(db)  # 池化下归还空闲队列，连接仍存活
+    assert len(pool._all) == 1
+    await conn_mod.close_pool()
+    assert len(pool._all) == 0  # 全部关闭，进程可干净退出

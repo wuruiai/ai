@@ -8,7 +8,7 @@ Usage:
     python -m scripts.backup_data --retention-days 7
 
 备份内容：
-    - data/water.db (+ -wal / -shm 一并拷贝，保证一致性)
+    - data/water.db（SQLite 在线备份 API 一致性快照，含 WAL 已提交数据）
     - data/chroma/ 向量库目录
 
 备份后自检：
@@ -53,6 +53,25 @@ def _parse_backup_stamp(name: str) -> datetime | None:
         return datetime.strptime(m.group(1), "%Y%m%d_%H%M%S").replace(tzinfo=tz)
     except ValueError:
         return None
+
+
+def _backup_db(src_path: Path, dst_path: Path) -> None:
+    """用 SQLite 在线备份 API 产出一致性快照，替代裸文件拷贝（G10.24）。
+
+    裸拷贝 db+-wal+-shm 三份文件的拷贝瞬间状态各不相同，快照可能相互不一致；
+    sqlite3 的 `Connection.backup()` 由引擎保证页级一致，并把 WAL 中已提交数据
+    一并落进目标——备份产物是可直接独立打开的单文件数据库。
+    """
+    src = sqlite3.connect(str(src_path))
+    dst = sqlite3.connect(str(dst_path))
+    try:
+        # 应用可能正在写入：写锁最多等 busy_timeout（默认 5000ms）
+        src.execute("PRAGMA busy_timeout = 5000")
+        src.backup(dst)
+        dst.commit()
+    finally:
+        src.close()
+        dst.close()
 
 
 def validate_backup(target: Path) -> list[str]:
@@ -114,16 +133,11 @@ def run_backup(note: str = "", retention_days: int | None = None) -> int:
 
     copied: list[str] = []
 
-    # 1. SQLite 数据库（含 WAL/SHM，保证一致性）
+    # 1. SQLite 数据库（在线备份 API 一致性快照，含 WAL 已提交数据）
     db = Path(settings.SQLITE_PATH)
     if db.exists():
-        shutil.copy2(db, target / db.name)
+        _backup_db(db, target / db.name)
         copied.append(db.name)
-        for suffix in ("-wal", "-shm"):
-            extra = Path(str(db) + suffix)
-            if extra.exists():
-                shutil.copy2(extra, target / extra.name)
-                copied.append(extra.name)
 
     # 2. Chroma 向量库目录
     chroma_dir = Path(settings.CHROMA_PATH)
