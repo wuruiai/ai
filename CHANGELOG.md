@@ -23,6 +23,12 @@
 
 ### Fixed
 
+- **GitHub Actions 工作流解析失败（G10.26）**：首次推送 `main` 后 CI 整条 run 0 秒失败、
+  无日志——两处 `if:` 表达式非法使用 `secrets` context（step 级与 job 级 `if` 均不允许，
+  可用 context 仅 `env/github/inputs/needs/vars/...`），GitHub 解析期直接判工作流无效。
+  修复为官方推荐模式：secret 显式注入 `env` 后改判 `env.X != ''`（smoke job 降级为步骤级
+  门控）。actionlint 校验通过。另修正 `build-images` 推送守卫仍指向 `refs/heads/master`
+  （分支已改名 `main`），否则 GHCR 镜像永不推送。
 - **测试缺口：并发上传竞态 + knowledge_qa 图 + reranker（G10.25）**：三处此前无测试覆盖的
   行为补齐回归用例。① **并发上传竞态**：两个同内容上传同时通过查重时，`INSERT OR IGNORE`
   只有一个生效（rowcount=1），另一个 rowcount=0 走竞态清理路径——清理自己写的孤儿文件、
