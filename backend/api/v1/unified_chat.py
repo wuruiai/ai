@@ -50,7 +50,8 @@ router = APIRouter()
 class UnifiedChatRequest(BaseModel):
     """统一聊天请求"""
 
-    message: str = Field(..., min_length=1, description="用户消息")
+    # max_length：防超大消息直接灌给 LLM（token 黑洞），与 chat.py ChatRequest 对齐
+    message: str = Field(..., min_length=1, max_length=2000, description="用户消息")
     agent_type: AgentType = Field(
         default=AgentType.KNOWLEDGE_QA,
         description="knowledge_qa / document_analysis / water_expert",

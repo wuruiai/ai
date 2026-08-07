@@ -107,3 +107,17 @@ def test_chat_requires_auth():
     with TestClient(app) as c:
         r = c.post("/api/v1/chat/stream", json={"query": "x", "thread_id": "t"})
         assert r.status_code == 401  # 未认证
+
+
+def test_chat_query_too_long_422():
+    """G10.16：query 超长（>2000）在进入编排前被 422 拒绝——防止超大查询灌给 LLM。"""
+    with TestClient(app) as c:
+        r = c.post("/api/v1/auth/register", json={"username": "len_chat", "password": "pass123456"})
+        tok = r.json()["token"]
+        h = {"Authorization": f"Bearer {tok}"}
+        r = c.post(
+            "/api/v1/chat/stream",
+            json={"query": "x" * 2001, "thread_id": "t"},
+            headers=h,
+        )
+        assert r.status_code == 422

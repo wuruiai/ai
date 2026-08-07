@@ -54,7 +54,8 @@ _KEEPALIVE_S = 15
 
 
 class ChatRequest(BaseModel):
-    query: str = Field(..., min_length=1, description="用户问题")
+    # max_length：防超大查询直接灌给 LLM（token 黑洞）——聊天问题是短文本，2000 字足够
+    query: str = Field(..., min_length=1, max_length=2000, description="用户问题")
     thread_id: str = Field(default="default", description="会话线程 ID")
 
 

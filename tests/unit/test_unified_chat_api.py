@@ -115,6 +115,16 @@ def test_unified_chat_requires_auth():
         assert r.status_code == 401
 
 
+def test_unified_chat_message_too_long_422():
+    """G10.16：message 超长（>2000）在进入编排前被 422 拒绝，与 chat.py 对齐。"""
+    with TestClient(app) as c:
+        r = c.post("/api/v1/auth/register", json={"username": "len_uni", "password": "pass123456"})
+        tok = r.json()["token"]
+        h = {"Authorization": f"Bearer {tok}"}
+        r = c.post("/api/v1/unified-chat/", json={"message": "x" * 2001}, headers=h)
+        assert r.status_code == 422
+
+
 class _CrashOrch:
     """handle 抛未预期异常（内部细节不得外泄）。"""
 

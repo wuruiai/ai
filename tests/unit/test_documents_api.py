@@ -52,6 +52,14 @@ def test_document_crud(monkeypatch):
         )
         assert r.status_code == 400
 
+        # Content-Length 预检（G10.16）：超大文件在读盘前被 413 拒绝（不整读进内存）
+        r = c.post(
+            "/api/v1/documents/",
+            files={"file": ("big.txt", b"tiny", "text/plain")},
+            headers={**h, "Content-Length": str(101 * 1024 * 1024)},
+        )
+        assert r.status_code == 413
+
         # PATCH 元数据（知识库结构化）
         r = c.patch(
             f"/api/v1/documents/{doc_id}", json={"category": "防洪", "is_enabled": 0}, headers=h

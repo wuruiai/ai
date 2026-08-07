@@ -211,6 +211,16 @@ async def upload_document(
             detail=f"unsupported file type: {ext}; allowed={sorted(_ALLOWED_EXTS)}",
         )
 
+    # Content-Length 预检（G10.16）：读盘前拦截超大文件——file.read() 会把整个请求体
+    # 读进内存，超限文件不必等读完才发现。Content-Length 仅作前端拦截（可伪造），
+    # 下方 read() 后的实际大小校验仍是最终防线。
+    content_length = request.headers.get("content-length")
+    if content_length and content_length.isdigit() and int(content_length) > _MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f"file too large: {content_length} > {_MAX_FILE_SIZE}",
+        )
+
     content = await file.read()
     if len(content) == 0:
         raise HTTPException(status_code=400, detail="empty file")
