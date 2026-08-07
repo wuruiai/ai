@@ -15,7 +15,10 @@ class Settings(BaseSettings):
     """应用配置"""
 
     # 应用基础
-    APP_ENV: str = "local"
+    # 运行环境（G10.18 fail-closed）：默认 production——生产漏配 APP_ENV 不再静默按 local
+    # 跳过密钥校验，而是触发 ensure_secrets() 缺密钥拒绝启动；本地/开发必须显式
+    # APP_ENV=local（.env.example 已含，测试 conftest 已固定）。
+    APP_ENV: str = "production"
     APP_HOST: str = "127.0.0.1"
     APP_PORT: int = 8001
     # 应用版本（G8.2 单一来源）：health 探针 / OpenAPI 统一从这里读；

@@ -18,6 +18,8 @@
 - `.env` 全程 gitignored（`.gitignore` 含 `.env.*`，仅保留 `.env.example` 模板），任何 secrets 不入库。
 - **非本地 fail-fast**：`APP_ENV != local`（production / staging 等）时 `ensure_secrets()`
   强制校验 `TOKEN_SECRET` 与 `DASHSCOPE_API_KEY`，缺失直接拒绝启动。
+- **默认 fail-closed（G10.18）**：`APP_ENV` 未显式配置时默认 `production`——生产漏配不再静默降级
+  为 local 跳过校验；本地/开发必须显式 `APP_ENV=local`。
 - 本地开发留空 `TOKEN_SECRET` 时使用进程级随机值（重启后旧 token 失效，仅限开发便利）。
 
 ## 数据隔离

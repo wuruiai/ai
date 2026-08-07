@@ -83,6 +83,10 @@
 
 ### Security
 
+- **配置 fail-closed（G10.18）**：`APP_ENV` 默认值从 `local` 翻转为 `production`——此前漏配
+  `APP_ENV` 的部署会静默按 local 运行，`ensure_secrets()` 直接豁免，带空 `TOKEN_SECRET` /
+  `DASHSCOPE_API_KEY` 上线（密钥校验形同虚设）。现未显式配置即按生产处理，缺密钥拒绝启动；
+  本地/开发必须显式 `APP_ENV=local`（.env.example 已含，测试 conftest 固定）。1 个回归测试。
 - **X-Forwarded-For 仅对可信代理采信（G10.17）**：登录/注册限流、审计与 access 日志的
   客户端 IP 解析不再无条件信任 `X-Forwarded-For` 最左侧——攻击者可伪造该头逐条旋转
   "来源 IP"，逐请求规避 IP 维度限流（也让 G10.13 的锁号作用域形同虚设）。新增

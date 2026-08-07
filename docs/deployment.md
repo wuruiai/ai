@@ -40,6 +40,7 @@ docker compose -f docker-compose.prod.yml up -d
 生产清单特性：
 
 - 强制 `APP_ENV=production` → 后端 `ensure_secrets()` 缺密钥 **fail-fast** 拒绝启动。
+  （G10.18：未显式配置 APP_ENV 时默认即 production，生产漏配同样 fail-closed，不会静默按 local 跳过校验。）
 - `restart: always`，数据用命名卷持久化。
 - 健康检查走 `/health/ready` 就绪探针（SQLite + Chroma 均可达才 healthy）。
 - 密钥经宿主环境变量 / `.env.production` 注入（已被 `.gitignore` 排除，不入库）。
@@ -81,7 +82,7 @@ docker run -d --name water-backup-cron -v water-data:/app/data <镜像> python -
 
 | 变量 | 默认 | 说明 |
 |------|------|------|
-| `APP_ENV` | `local` | 非 `local`（production/staging 等）触发密钥 fail-fast 校验 |
+| `APP_ENV` | `production` | 默认 fail-closed；本地/开发须显式 `local`（非 local 触发密钥 fail-fast 校验） |
 | `APP_PORT` | `8001` | 后端监听端口 |
 | `TOKEN_SECRET` | 空 | JWT 签名密钥；**生产必填**（缺失拒绝启动） |
 | `DASHSCOPE_API_KEY` | 空 | 云端模型密钥；**生产必填** |

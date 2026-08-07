@@ -37,3 +37,16 @@ def test_ensure_secrets_nonlocal_ok_when_set():
         DASHSCOPE_API_KEY="y",
     )
     s.ensure_secrets()  # 不抛
+
+
+def test_app_env_default_is_production(monkeypatch):
+    """G10.18：APP_ENV 未显式配置时默认 production（fail-closed）。
+
+    生产漏配 APP_ENV 不再静默按 local 跳过密钥校验。此处清空环境变量
+    （conftest 固定了 local）并禁用 .env 注入，验证默认值即生产语义。
+    """
+    monkeypatch.delenv("APP_ENV", raising=False)
+    s = Settings(_env_file=None, TOKEN_SECRET="", DASHSCOPE_API_KEY="")
+    assert s.APP_ENV == "production"
+    with pytest.raises(RuntimeError, match="TOKEN_SECRET"):
+        s.ensure_secrets()
