@@ -30,6 +30,9 @@
 
 ### Fixed
 
+- **planning 文档自嘲措辞中性化（G10.31）**：`docs/planning/enterprise-optimization-plan.md`
+  两处内部审计措辞改客观描述（G0.1「PyCharm 模板残留」→「PyCharm 模板遗留文件」；
+  G0.3「欺骗性绿」→「门禁失效，实际未拦截」），消除转公开后对评审/面试的不专业观感。
 - **CI smoke job 配置 DashScope Key 后无法真实运行（G10.28）**：仓库配置
   `DASHSCOPE_API_KEY` secret 后，smoke job 门控打开，但 `ensure_secrets()`（G10.18
   fail-closed）在非 local 环境强制 `TOKEN_SECRET` + `DASHSCOPE_API_KEY` 双密钥，缺后者
